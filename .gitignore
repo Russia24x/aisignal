@@ -65,6 +65,7 @@ server.log
 /tool-results/
 /agent-ctx/
 /qa-*.png
+/qa/
 
 # --- sandbox-only infra (never push; kept locally for dev) ---
 /tests/

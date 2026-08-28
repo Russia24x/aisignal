@@ -205,7 +205,10 @@ export function PricingSection() {
         </div>
 
         {!authenticated && (
-          <p className="mt-5 text-center text-xs text-muted-foreground">{t("signal.connectFirst")}</p>
+          <p className="mt-5 text-center text-xs text-muted-foreground">
+            {/* state-accurate hint: connected users only need to sign in */}
+            {walletStatus === "connected" ? t("signal.signInFirst") : t("signal.connectFirst")}
+          </p>
         )}
       </div>
 

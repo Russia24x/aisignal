@@ -225,6 +225,9 @@ idle ── «پرداخت از کیف پول» ──► sending ──(hash)�
 | مشکل | علت | راه‌حل |
 |---|---|---|
 | کلیک «اتصال» هیچ پنجره‌ای باز نمی‌کند | popup blocker مرورگر (به‌خصوص اولین اتصال که fetch اولیه SDK طول می‌کشد) | اجازهٔ popup به سایت بدهید؛ دوباره کلیک کنید. پیام `POPUP_BLOCKED` دقیقاً همین را می‌گوید. پیش‌گرم‌سازی پروایدر در `useAuth` این حالت را به‌شدت کم کرده است |
+| **«Runtime TypeError: Failed to fetch» (خطای اورلی dev)** | fetch اولیهٔ جزئیات پروایدر AGW (auth.privy.io) در شبکه‌های ناپایدار رد می‌شود و SDK آن را unhandled رها می‌کند (wagmi داخل `createConfig` همیشه `connector.setup()` را بدون catch صدا می‌زند) | **رفع ریشه‌ای:** پل `lib/agw-bridge.ts` — retry شفاف همان GET با backoff کوتاه (۲۵۰/۷۵۰/۲۰۰۰ms) + گارد `unhandledrejection` که دقیقاً همین رد شدن را می‌بلعد. SDK در استفادهٔ بعدی خودش دوباره تلاش می‌کند |
+| **کیف را از هدر وصل می‌کنم ولی بقیهٔ بخش‌ها هنوز «وصل نشده» می‌گویند تا reload کنم** | ۱) `entitlements` فقط یک‌بار در mount واکشی می‌شد و با وصل‌شدن کیف دوباره چک نمی‌شد؛ ۲) اگر مسیر زندهٔ postMessage پاپ‌آپ گم شود، wagmi تا reload متوجه اتصال نمی‌شود | **رفع ریشه‌ای:** ۱) `useAuth` حالا با هر تغییر اکانت (`address`) سشن را refresh می‌کند؛ ۲) connection watcher پل AGW بعد از هر `login()` اتصال ذخیره‌شده را poll می‌کند و wagmi را بدون reload sync می‌کند؛ ۳) متن گیت‌ها حالت واقعی را نشان می‌دهد (وصل = «پیام ورود را امضا کنید»، نه «کیف را وصل کنید») |
+| **روی پلن کلیک می‌کنم و هیچ اتفاقی نمی‌افتد** | `signIn()`/`login()` قبلاً fire-and-forget بودند و خطا (مثلاً همین قطعی auth.privy.io) بی‌صدا می‌مرد | **رفع ریشه‌ای:** هر دو مسیر حالا promise دارند و هر خطا بلافاصله toast فارسی/انگلیسی‌شده نشان می‌دهند (`wallet.error.*`) — هیچ مرحله‌ای از زنجیرهٔ auth بی‌بازخورد نیست |
 | «Request timed out» | popup بیش از ۲ دقیقه بدون پاسخ ماند | دوباره تلاش کنید؛ اتصال اینترنت/پرتال را چک کنید |
 | popup باز می‌شود ولی امضا نمی‌آید | درخواست در سمت پرتال pend ماند | بستن popup = رد (`SIGNATURE_REJECTED`)؛ تلاش مجدد |
 | **امضا را در پاپ‌آپ تأیید می‌کنم ولی «هیچ اتفاقی نمی‌افتد»** | اپ داخل iframe (پنل پیش‌نمایش) اجرا شده و مرورگر کوکی `SameSite` سشن را در زمینهٔ cross-site مسدود می‌کند — سشن سمت سرور برقرار شده ولی به UI نمی‌رسد | **رفع ریشه‌ای:** سشن دو حالته — سرور همان توکن HMAC را در پاسخ verify برمی‌گرداند و کلاینت آن را در localStorage نگه داشته و با هدر `Authorization: Bearer` می‌فرستد (`lib/client-session.ts`). کوکی هم روی HTTPS با `SameSite=None; Secure` ست می‌شود. عیب‌یابی: در کنسول `[auth] session mode: cookie|bearer` را ببینید |
@@ -243,7 +246,8 @@ idle ── «پرداخت از کیف پول» ──► sending ──(hash)�
 | Provider رسمی + chain از `viem/chains` | ✅ منطبق |
 | `login()` فقط در کلیک‌هندلر | ✅ منطبق |
 | **امضا فقط از کلیک (الگوی مثال رسمی agw-signing-messages) — بدون signIn خودکار از effect** | ✅ رفع ریشه‌ای بلاک‌شدن پاپ‌آپ |
-| **پیش‌گرم‌سازی پروایدر AGW بعد از mount (fetch auth.privy.io)** | ✅ اضافه شد |
+| **پیش‌گرم‌سازی پروایدر AGW بعد از mount (fetch auth.privy.io)** | ✅ اضافه شد + **پل شبکهٔ AGW: retry شفاف + گارد unhandled rejection + connection watcher (`lib/agw-bridge.ts`)** |
+| **بازخورد بصری برای هر شکست auth (toast متمرکز در useAuth — بدون گام بی‌صدا)** | ✅ اضافه شد |
 | **SIWE کاملاً رسمی EIP-4361: `generateSiweNonce` + `createSiweMessage` + `parseSiweMessage` + `validateSiweMessage` + `verifySiweMessage` از `viem/siwe`** | ✅ مهاجرت کامل (این بازبینی — طبق build.abs.xyz/docs/authentication/siwe-button) |
 | **اعتبارسنجی chain + domain + expirationTime روی پیام امضاشده (ضد replay بین‌دامنه‌ای — چک‌های رسمی)** | ✅ اضافه شد (INVALID_CHAIN / INVALID_DOMAIN / MESSAGE_EXPIRED) |
 | امضا با `signMessageAsync` و راستی‌آزمایی EIP-1271 مقابل آدرس اسمارت‌اکانت | ✅ منطبق |

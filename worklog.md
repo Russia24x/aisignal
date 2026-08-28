@@ -1105,3 +1105,89 @@ Stage Summary:
   after logout on OTHER devices (standard SIWE+JWT trade-off, documented);
   wallet re-connect after reload is a separate lifecycle (documented in
   troubleshooting)
+
+---
+Task ID: 21
+Agent: main
+Task: Fix "Runtime TypeError: Failed to fetch" + wallet-state not syncing across sections until reload + plan-click doing nothing (user reports, Persian)
+
+Work Log:
+- SESSION-START-SYNC-CHECK (per RULES.md): tree clean, local == origin/main
+  (180a3c9), no cron jobs, no force push
+- REPRODUCED the overlay error deterministically: with auth.privy.io
+  unreachable (user's flaky network simulated via request blocking), page
+  load throws unhandled "TypeError: Failed to fetch" — stack: wagmi
+  createConfig → connector.setup?.() (fire-and-forget, uncalled catch) →
+  AGW connector → privy client loadProviderDetails() → fetch details GET.
+  App still renders, but the dev overlay shows "1 Issue" (exactly what the
+  user reported) and the connector's event listeners never attach
+- ROOT CAUSES of all three reports traced to the flaky privy-details
+  fetch + fire-and-forget auth calls:
+  1) overlay error = the unhandled warm-up rejection above
+  2) "sections don't sync until reload": entitlements were fetched ONCE on
+     mount — connecting the wallet never re-fetched them, so every section
+     gate kept its pre-connect anonymous state (a reload re-fetched and,
+     with the stored bearer token, authenticated — "refresh fixes it")
+  3) "plan click does nothing": PricingSection called `void signIn()` /
+     fire-and-forget SDK `login()` — every failure died silently
+- FIX 1 — NEW lib/agw-bridge.ts (client resilience layer, installed at
+  module scope in providers.tsx BEFORE the SDK boots):
+  * fetch patch: transparent retry (250/750/2000ms — inside the popup's
+    transient-activation window) for the AGW provider-details GET; final
+    failure rethrows with a private __agwBridgeRetried tag
+  * unhandledrejection guard: preventDefault + console.warn for exactly
+    the tagged rejection (validated empirically: guarded rejections do NOT
+    reach the Next.js dev overlay); real app errors still surface
+  * connection watcher: polls the persisted AGW connection after every
+    login(); if the SDK's live postMessage path breaks but the connection
+    lands, force-syncs wagmi via the isAuthorized fast-path — the reload's
+    job, done live
+- FIX 2 — useAuth rework:
+  * login() is now an OWNED promise (dropped SDK's fire-and-forget
+    useLoginWithAbstract): arms the watcher, await connectAsync, every
+    failure → localized toast; stale popup-timeout after a watcher sync is
+    suppressed via statusRef
+  * signIn() failures toast centrally (single source; Header's local toast
+    removed to avoid doubles) — no silent auth step anywhere anymore
+  * entitlements refresh now keyed on [address, refresh] — re-fetches the
+    session whenever the connected account changes (connect/disconnect/
+    switch), so section gates flip live without a reload
+- FIX 3 — providers.tsx: transport memoized (http(url) per call made the
+  wagmi config rebuild on every Providers re-render → full state reset)
+- FIX 4 — state-accurate gate copy: SignalSection ConnectGate + Pricing
+  hint now say "wallet connected — sign the login message" (PenLine icon)
+  when the wallet IS connected, instead of the misleading "connect your
+  wallet"; new i18n keys signal.signInFirst (fa/en), improved
+  wallet.error.NETWORK copy, new wallet.error.CONNECTOR_MISSING (fa/en)
+- VERIFICATION (agent-browser):
+  * privy blocked + reload: ZERO page errors (overlay error eliminated),
+    bridge warning only; app renders all 9 sections
+  * blocked→unblocked click cycle: connect popup (portal.abs.xyz) opens
+    with correct params — recovery works
+  * fake-connection record + reload: wagmi auto-reconnects, all sections
+    show the accurate sign-in state live
+  * sign-in with privy blocked: fails after the bridge retries (~3s) →
+    CENTRALIZED TOAST captured: "خطای شبکه — اتصال اینترنت را بررسی
+    کنید و دوباره تلاش کنید" (polled 500ms — earlier checks missed
+    sonner's 4s toast window)
+  * plan click (anonymous): official AGW connect popup opens from the
+    click gesture; 6/6 pricing CTAs enabled
+  * fresh session QA: 0 page errors, EN↔FA/RTL toggle works, hourly chart
+    tab + FAQ accordion work, mobile 390px zero horizontal overflow,
+    footer at natural bottom, lint clean, tsc clean, dev.log clean (only
+    historical mid-edit HMR noise)
+- Docs: WALLET-AND-TRANSACTIONS.md §8 — three new troubleshooting rows
+  (overlay error, state-sync, silent plan click) + compliance checklist
+  updated with the AGW bridge + centralized feedback entries
+
+Stage Summary:
+- All three user reports fixed at the root: the flaky AGW details fetch
+  now retries transparently and its failure is contained (no overlay
+  error); wallet connection state propagates to every section live
+  (entitlements refresh on account change + watcher safety net + stable
+  wagmi config); every auth step gives immediate localized feedback
+- The auth chain is now fully self-healing: connect → sign-in → purchase
+  each either succeeds visibly or explains itself in a toast
+- Note for QA: sign-popup completion cannot be E2E-tested in this sandbox
+  (needs a real Abstract wallet); verified up to popup-open + the full
+  failure-feedback paths with real gestures

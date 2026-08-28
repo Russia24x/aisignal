@@ -36,6 +36,7 @@ import {
   Loader2,
   Lock,
   PauseCircle,
+  PenLine,
   ShieldCheck,
   Sparkles,
   Target,
@@ -214,13 +215,19 @@ export function SignalSection() {
 function ConnectGate() {
   const { t } = useI18n();
   const { login, signIn, signingIn, walletStatus } = useAuth();
+  const connected = walletStatus === "connected";
   return (
     <div className="glass-card flex flex-col items-center gap-5 px-6 py-14 text-center">
       <span className="grid size-16 place-items-center rounded-2xl bg-primary/15 text-primary ring-2 ring-primary/30">
-        <Wallet className="size-8" />
+        {/* accurate affordance: wallet = connect step, pen = sign-in step */}
+        {connected ? <PenLine className="size-8" /> : <Wallet className="size-8" />}
       </span>
-      <p className="max-w-md text-lg font-bold">{t("signal.connectFirst")}</p>
-      {walletStatus === "connected" ? (
+      {/* copy must match the actual state — "connect your wallet" while the
+          wallet is already connected reads as a sync bug to the user */}
+      <p className="max-w-md text-lg font-bold">
+        {connected ? t("signal.signInFirst") : t("signal.connectFirst")}
+      </p>
+      {connected ? (
         <Button onClick={() => signIn()} size="lg" disabled={signingIn} className="gap-2 font-bold">
           {signingIn && <Loader2 className="size-5 animate-spin" />}
           {signingIn ? t("wallet.signing") : t("wallet.signInTitle")}

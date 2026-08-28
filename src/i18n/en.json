@@ -56,6 +56,7 @@
     "generatedAt": "Generated at",
     "candlesUsed": "candles analyzed",
     "connectFirst": "Connect your Abstract wallet to view the signal",
+    "signInFirst": "Wallet connected — sign the login message to continue",
     "consensus": "Indicator consensus",
     "previewNote": "Free preview — full signal after payment",
     "locked": "Locked",
@@ -209,7 +210,8 @@
       "RATE_LIMITED": "Too many attempts — wait a moment and try again",
       "SIGNATURE_REJECTED": "Signature request rejected",
       "SIGNATURE_FAILED": "Signature verification failed — try again",
-      "NETWORK": "Network error — try again",
+      "NETWORK": "Network error — check your connection and try again",
+      "CONNECTOR_MISSING": "Abstract wallet is unavailable — reload the page and try again",
       "POPUP_BLOCKED": "Wallet popup was blocked — allow popups for this site and try again",
       "TIMEOUT": "Request timed out — please try again"
     }

@@ -46,12 +46,12 @@ export function Header() {
   // (e.g. misconfigured env or a non-AGW connector).
   const wrongNetwork = walletStatus === "connected" && chainId !== undefined && chainId !== publicConfig.chainId;
 
-  /** Sign in and surface a localized toast when it fails. */
-  const handleSignIn = async () => {
-    const res = await signIn();
-    if (!res.ok && res.errorCode) {
-      toast.error(t(`wallet.error.${res.errorCode}`));
-    }
+  /**
+   * Sign in — failures toast centrally inside useAuth.signIn (single
+   * source; this wrapper exists only to bind the click gesture).
+   */
+  const handleSignIn = () => {
+    void signIn();
   };
 
   const price = data?.snapshot.priceUsd;

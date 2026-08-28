@@ -6,6 +6,9 @@
  * Flow (popup-safe — follows the official AGW integration pattern from
  * docs.abs.xyz / build.abs.xyz, and the official SIWE component):
  *  1. `login()` opens the AGW connect popup — ALWAYS from a click handler.
+ *     The returned promise is OWNED here: every failure surfaces as a
+ *     localized toast (previously connect failures were completely silent
+ *     — "nothing happens").
  *  2. `signIn()` (also click-triggered only) fetches a server-prepared
  *     EIP-4361 SIWE message (single-use nonce, domain+chain bound), asks the
  *     wallet to sign it in the AGW popup, and posts {message, signature} to
@@ -30,17 +33,27 @@
  *    lazily on first use; we pre-warm it on mount so the connect popup
  *    opens as fast as possible inside the click's activation window.
  *
+ * LIVE-STATE SYNC (agw-bridge): the popup delivers the wallet connection
+ * back via window.postMessage. If that live path breaks (flaky network to
+ * the privy/abs domains, lost message, …) the connection is only persisted
+ * in localStorage and wagmi stays "disconnected" until a manual page
+ * reload — the exact "sections still show connect-wallet" symptom. The
+ * bridge's connection watcher polls the persisted connection after every
+ * `login()` and force-syncs wagmi the moment it appears — the reload's
+ * job, done live.
+ *
  * `signIn()` NEVER throws: it returns `{ ok, errorCode }` with a stable
- * error code (RATE_LIMITED, SIGNATURE_REJECTED, …) that callers map to a
- * localized message. This keeps unhandled-rejection crashes out of the
- * dev overlay and gives the user actionable feedback instead.
+ * error code (RATE_LIMITED, SIGNATURE_REJECTED, …). Failures ALSO toast a
+ * localized message here (single source — callers must not double-toast).
  *
  * @module components/pengu/useAuth
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAccount, useConnect, useSignMessage } from "wagmi";
-import { useLoginWithAbstract } from "@abstract-foundation/agw-react";
+import { useAccount, useConnect, useDisconnect, useSignMessage } from "wagmi";
+import { toast } from "sonner";
 import { createLogger } from "@/lib/client-logger";
+import { armConnectionWatch } from "@/lib/agw-bridge";
+import { useI18n } from "@/components/i18n/I18nProvider";
 import { authFetch, saveSessionToken, clearSessionToken } from "@/lib/client-session";
 import type { EntitlementsDTO as Entitlements } from "@/lib/modules/access/passes";
 
@@ -63,7 +76,8 @@ export type SignInErrorCode =
   | "POPUP_BLOCKED"
   | "TIMEOUT"
   | "SIGNATURE_FAILED"
-  | "NETWORK";
+  | "NETWORK"
+  | "CONNECTOR_MISSING";
 
 export interface SignInResult {
   ok: boolean;
@@ -123,9 +137,17 @@ function classifyError(err: unknown, serverCode?: string): SignInErrorCode {
 
 export function useAuth() {
   const { address, status, chainId } = useAccount();
-  const { login, logout: walletLogout } = useLoginWithAbstract();
+  const { disconnect: walletLogout } = useDisconnect();
   const { signMessageAsync } = useSignMessage();
-  const { connectors } = useConnect();
+  const { connectors, connectAsync } = useConnect();
+  const { t } = useI18n();
+
+  // Mirror of wagmi's account status for async callbacks (watcher sync)
+  // that outlive the render they were created in.
+  const statusRef = useRef(status);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const [state, setState] = useState<SessionState>({
     loading: true,
@@ -157,11 +179,19 @@ export function useAuth() {
     return null;
   }, []);
 
+  // Re-fetch the session whenever the connected ACCOUNT changes (connect /
+  // disconnect / account switch) — not just on mount. Without this, wagmi's
+  // store updates (Header shows the address) but `entitlements` stays at its
+  // pre-connect anonymous value, so every section gate keeps rendering the
+  // "connect wallet" state until a manual page reload — the exact
+  // "sections don't sync until I refresh" symptom. On connect, the stored
+  // bearer token (or cookie) is re-read server-side and the sections flip to
+  // their real state live.
   useEffect(() => {
     void (async () => {
       await refresh();
     })();
-  }, [refresh]);
+  }, [address, refresh]);
 
   /**
    * Pre-warm the AGW (privy cross-app) provider after mount.
@@ -190,7 +220,8 @@ export function useAuth() {
    * Request a server message + signature + session establishment.
    * MUST be called from a click handler: the AGW signature popup is a
    * `window.open`, which browsers only allow inside a user gesture.
-   * Never throws — inspect the returned result instead.
+   * Never throws — inspect the returned result for flow control; failures
+   * toast a localized message HERE (single source, no double-toasting).
    */
   const signIn = useCallback(
     async (): Promise<SignInResult> => {
@@ -199,6 +230,10 @@ export function useAuth() {
       const fail = (code: SignInErrorCode): SignInResult => {
         log.warn("sign-in failed", { code });
         setState((s) => ({ ...s, signingIn: false, error: code }));
+        // Centralized feedback: an auth step must NEVER fail silently
+        // ("I click a plan and nothing happens"). Callers must NOT
+        // double-toast — inspect the returned result for flow control only.
+        toast.error(t(`wallet.error.${code}`));
         return { ok: false, errorCode: code };
       };
       try {
@@ -246,7 +281,7 @@ export function useAuth() {
         return fail(classifyError(err));
       }
     },
-    [address, signMessageAsync, refresh],
+    [address, signMessageAsync, refresh, t],
   );
 
   // NOTE: no automatic sign-in effect here. Opening the AGW signature
@@ -254,6 +289,62 @@ export function useAuth() {
   // browsers (official AGW examples sign from explicit clicks only).
   // The Header / SignalSection CTAs cover the connected-but-signed-out
   // state — `needsSignIn` below tells the UI when to highlight them.
+
+  /**
+   * Connect the Abstract Global Wallet (replaces the SDK's fire-and-forget
+   * `useLoginWithAbstract().login` with an OWNED promise).
+   *
+   *  - every failure (blocked popup, unreachable AGW domains, timeout, …)
+   *    surfaces as a localized toast — previously connect failures were
+   *    completely silent ("nothing happens");
+   *  - arms the agw-bridge connection watcher so, if the popup's live
+   *    postMessage path breaks, wagmi still adopts the persisted
+   *    connection the moment it lands — no page reload needed.
+   *
+   * MUST be called from a click handler (AGW popup = window.open).
+   */
+  const login = useCallback(async (): Promise<void> => {
+    const connector = connectors.find((c) => c.id === "xyz.abs.privy" || c.type === "privy");
+    if (!connector) {
+      log.warn("AGW connector not found");
+      toast.error(t("wallet.error.CONNECTOR_MISSING"));
+      return;
+    }
+
+    armConnectionWatch({
+      probe: async () => {
+        try {
+          const accounts = await connector.getAccounts();
+          return accounts[0] ?? null;
+        } catch {
+          return null;
+        }
+      },
+      sync: async () => {
+        if (statusRef.current === "connected") return; // live path already worked
+        try {
+          await connectAsync({ connector });
+          log.debug("wallet connection force-synced via bridge watcher");
+        } catch (err) {
+          log.warn("bridge watcher sync failed", { err: String(err) });
+        }
+      },
+    });
+
+    try {
+      await connectAsync({ connector });
+      // Success: wagmi's store updates → every useAccount() subscriber
+      // (Header, SignalSection, PricingSection, …) re-renders connected.
+    } catch (err) {
+      // The bridge watcher may have force-synced the connection while the
+      // popup's own promise was still pending (lost postMessage) — in that
+      // case the eventual popup timeout is stale noise, not a user error.
+      if (statusRef.current === "connected") return;
+      const code = classifyError(err);
+      log.warn("connect failed", { code, err: String(err) });
+      toast.error(t(`wallet.error.${code}`));
+    }
+  }, [connectAsync, connectors, t]);
 
   /** Full logout: server session + stored token + wallet disconnect. */
   const signOut = useCallback(async () => {
