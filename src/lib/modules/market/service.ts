@@ -24,15 +24,26 @@ const log = createLogger("market:service");
 const snapshotCache = new TTLCache<MarketSnapshot>(serverConfig.MARKET_CACHE_TTL_MS);
 const historyCache = new TTLCache<HistoryData>(serverConfig.HISTORY_CACHE_TTL_MS);
 
+/**
+ * Cross-check throttle: CoinGecko simple-price is only needed as an ops signal,
+ * not per-refresh. Checking every 10th cache miss (≈ every 10 min under traffic)
+ * keeps free-tier CoinGecko usage at ≤6 calls/hr instead of ≤60.
+ */
+const CROSS_CHECK_EVERY = 10;
+let snapshotMissCount = 0;
+
 export async function getSnapshot(): Promise<MarketSnapshot> {
   return snapshotCache.getOrRefresh("pengu", async () => {
     const snap = await fetchSnapshot();
     // cross-check price against CoinGecko; log large divergence (ops signal)
-    const cg = await fetchSimplePrice();
-    if (cg && snap.priceUsd > 0) {
-      const divergence = Math.abs(cg - snap.priceUsd) / snap.priceUsd;
-      if (divergence > 0.05) {
-        log.warn("price divergence between providers", { dex: snap.priceUsd, cg, divergence });
+    snapshotMissCount += 1;
+    if (snapshotMissCount % CROSS_CHECK_EVERY === 1) {
+      const cg = await fetchSimplePrice();
+      if (cg && snap.priceUsd > 0) {
+        const divergence = Math.abs(cg - snap.priceUsd) / snap.priceUsd;
+        if (divergence > 0.05) {
+          log.warn("price divergence between providers", { dex: snap.priceUsd, cg, divergence });
+        }
       }
     }
     // fire-and-forget: evaluate price alerts against this fresh snapshot

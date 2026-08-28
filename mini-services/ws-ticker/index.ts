@@ -18,7 +18,10 @@ import { Server } from "socket.io";
 const PORT = 3033;
 const PENGU_TOKEN = "0x9eBe3A824Ca958e4b3Da772D2065518F009CBa62";
 const DEX_URL = `https://api.dexscreener.com/latest/dex/tokens/${PENGU_TOKEN}`;
-const FETCH_INTERVAL_MS = 15_000;
+/** live interval when at least one client is connected (fresh UX) */
+const FETCH_ACTIVE_MS = 15_000;
+/** idle interval when nobody is connected — keeps cache warm at 1/4 the requests */
+const FETCH_IDLE_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -141,9 +144,20 @@ io.on("connection", (socket) => {
   });
 });
 
-const fetchTimer = setInterval(() => {
-  void tick();
-}, FETCH_INTERVAL_MS);
+/**
+ * Adaptive polling loop (resource-aware):
+ *  - clients connected  → poll every 15s (live ticker UX)
+ *  - zero clients       → poll every 60s (idle: 75% fewer upstream requests)
+ * Cuts idle DexScreener usage from 240 req/hr to 60 req/hr.
+ */
+let fetchTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleFetch(): void {
+  const interval = io.engine.clientsCount > 0 ? FETCH_ACTIVE_MS : FETCH_IDLE_MS;
+  fetchTimer = setTimeout(async () => {
+    await tick();
+    scheduleFetch();
+  }, interval);
+}
 
 const heartbeatTimer = setInterval(() => {
   const iso = new Date().toISOString();
@@ -156,11 +170,12 @@ httpServer.listen(PORT, () => {
   console.log(`[ws-ticker] listening on ${PORT}`);
   // prime the cache immediately so first client gets data on connect
   void tick();
+  scheduleFetch();
 });
 
 function shutdown(signal: string) {
   console.log(`[ws-ticker] ${signal} received, shutting down...`);
-  clearInterval(fetchTimer);
+  if (fetchTimer) clearTimeout(fetchTimer);
   clearInterval(heartbeatTimer);
   io.close();
   httpServer.close(() => process.exit(0));
