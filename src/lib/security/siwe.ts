@@ -1,28 +1,61 @@
 /**
- * SIWE-style (Sign-In With Ethereum) authentication for Abstract wallets.
+ * Official SIWE (Sign-In With Ethereum, EIP-4361) authentication for
+ * Abstract wallets — built on the standard `viem/siwe` utilities exactly as
+ * prescribed by the official Abstract docs:
+ *   - https://build.abs.xyz/docs/authentication/siwe-button
+ *   - https://docs.abs.xyz/abstract-global-wallet/agw-react/native-integration
  *
- * Flow:
- *  1. Client requests a nonce:        GET  /api/auth/nonce?address=0x..
- *  2. Client signs a domain-scoped message with the wallet (AGW or EOA).
- *  3. Client posts {address, signature}: POST /api/auth/verify
- *  4. Server verifies signature via viem `verifyMessage` — which transparently
- *     supports EIP-1271 contract signatures (Abstract Global Wallet is a
- *     smart account) — binds & burns the nonce, creates a session.
+ * Flow (server-prepared message — tamper-proof by construction):
+ *  1. Client requests a nonce:   GET  /api/auth/nonce?address=0x..
+ *     → server generates an official `generateSiweNonce()` and builds the
+ *       EIP-4361 message with `createSiweMessage()` (domain, URI, chainId,
+ *       nonce, issuedAt, expirationTime all server-controlled).
+ *  2. Client signs the message with the wallet (AGW or EOA) — click-triggered.
+ *  3. Client posts {message, signature}:  POST /api/auth/verify
+ *  4. Server parses the message with `parseSiweMessage()`, validates
+ *     structure + chain + domain + expiry + single-use nonce, then verifies
+ *     the signature via `publicClient.verifySiweMessage()` — which
+ *     transparently supports EIP-1271 contract signatures (Abstract Global
+ *     Wallet is a smart account) — burns the nonce and creates a session.
  *
- * Security: nonce is single-use + expiring; message binds domain, address,
- * nonce and issued-at; verification is entirely server-side.
+ * Hardening on top of the official reference implementation:
+ *  - nonces are persisted in the DB (single-use + TTL + optional address
+ *    pre-binding) instead of a session cookie → survives isolates, works
+ *    with D1 on Cloudflare Workers;
+ *  - the signed message is prepared SERVER-side (the official demo builds it
+ *    client-side), so a malicious client cannot tamper with the statement,
+ *    domain, URI or chainId it signs;
+ *  - domain is validated against BOTH the configured APP_URL host and the
+ *    live request host (gateway/proxy-safe);
+ *  - message expirationTime is short (10 min) rather than the demo's 7 days.
  *
  * @module lib/security/siwe
  */
-import { createHash, randomBytes } from "node:crypto";
-import { createPublicClient, http, checksumAddress, isAddress } from "viem";
+import { createHash } from "node:crypto";
+import {
+  createPublicClient,
+  http,
+  checksumAddress,
+  isAddress,
+} from "viem";
+import {
+  createSiweMessage,
+  generateSiweNonce,
+  parseSiweMessage,
+  validateSiweMessage,
+} from "viem/siwe";
 import type { PublicClient } from "viem";
 import { db } from "@/lib/db";
 import { serverConfig, publicConfig } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("auth:siwe");
-const NONCE_TTL_MS = 5 * 60 * 1000;
+
+/** How long a prepared sign-in message stays valid (official demo: 7 days —
+ *  we tighten to 10 minutes; the SESSION itself has its own 7-day TTL). */
+const MESSAGE_TTL_MS = 10 * 60 * 1000;
+/** Sanity ceiling for a message expirationTime (guards far-future clocks). */
+const MAX_MESSAGE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Public client bound to the configured Abstract chain. */
 export const chainClient: PublicClient = createPublicClient({
@@ -37,82 +70,132 @@ export function toChecksum(addr: string): string {
   return checksumAddress(addr as `0x${string}`);
 }
 
-/** Issue a single-use nonce (optionally pre-bound to an address). */
+/** Allowed hosts for the EIP-4361 `domain` field (app URL + request host). */
+function allowedDomains(extraHost?: string | null): Set<string> {
+  const hosts = new Set<string>();
+  try {
+    hosts.add(new URL(publicConfig.appUrl).host.toLowerCase());
+  } catch {
+    /* APP_URL already validated by config schema */
+  }
+  if (extraHost) hosts.add(extraHost.toLowerCase());
+  // localhost variants are interchangeable for local dev
+  if (hosts.has("localhost:3000")) hosts.add("127.0.0.1:3000");
+  if (hosts.has("127.0.0.1:3000")) hosts.add("localhost:3000");
+  return hosts;
+}
+
+/** Issue a single-use, official-format nonce (optionally address-bound). */
 export async function issueNonce(address?: string): Promise<{ nonce: string }> {
   // housekeeping: drop expired nonces occasionally
   await db.nonce.deleteMany({ where: { expiresAt: { lt: new Date() } } });
-  const nonce = randomBytes(16).toString("hex");
+  const nonce = generateSiweNonce(); // official viem/siwe generator
   await db.nonce.create({
     data: {
       nonce,
       address: address?.toLowerCase() ?? null,
-      expiresAt: new Date(Date.now() + NONCE_TTL_MS),
+      expiresAt: new Date(Date.now() + MESSAGE_TTL_MS),
     },
   });
   return { nonce };
 }
 
-/** Build the exact message the user must sign. */
+/**
+ * Build the exact EIP-4361 message the user must sign, using the official
+ * `createSiweMessage()` helper (server-controlled → tamper-proof).
+ */
 export function buildAuthMessage(params: {
   address: string;
   nonce: string;
-  issuedAt: string;
+  issuedAt?: Date;
   statement?: string;
 }): string {
-  const uri = new URL(publicConfig.appUrl).origin;
-  return [
-    `${publicConfig.appName} wants you to sign in with your Abstract account:`,
-    params.address,
-    "",
-    `By signing you confirm ownership of this wallet and accept the Terms of Service.`,
-    "",
-    `URI: ${uri}`,
-    `Version: 1`,
-    `Chain ID: ${publicConfig.chainId}`,
-    `Nonce: ${params.nonce}`,
-    `Issued At: ${params.issuedAt}`,
-  ].join("\n");
+  const issuedAt = params.issuedAt ?? new Date();
+  return createSiweMessage({
+    domain: new URL(publicConfig.appUrl).host,
+    address: toChecksum(params.address) as `0x${string}`,
+    statement:
+      params.statement ??
+      "Sign in to PenguSignals. This signature proves wallet ownership — no transactions, no fees.",
+    uri: new URL(publicConfig.appUrl).origin,
+    version: "1",
+    chainId: publicConfig.chainId,
+    nonce: params.nonce,
+    issuedAt,
+    expirationTime: new Date(issuedAt.getTime() + MESSAGE_TTL_MS),
+  });
 }
 
 export interface VerifyResult {
-  ok: boolean
-  error?: string
-  address?: string
+  ok: boolean;
+  error?: string;
+  address?: string;
 }
 
 /**
- * Verify an auth payload: nonce validity + signature authenticity.
+ * Verify a signed SIWE payload — the official verification chain
+ * (parse → validate structure → validate fields → verifySiweMessage with
+ * EIP-1271) plus our DB nonce hardening.
+ *
+ * @param params.message    the exact EIP-4361 string the wallet signed
+ * @param params.signature  0x-prefixed hex signature
+ * @param params.requestHost  Host header of the verify request (domain check)
  */
 export async function verifyAuth(params: {
-  address: string;
-  nonce: string;
-  issuedAt: string;
+  message: string;
   signature: `0x${string}`;
+  requestHost?: string | null;
 }): Promise<VerifyResult> {
-  const { address, nonce, issuedAt, signature } = params;
+  const { message, signature, requestHost } = params;
 
+  // 1. Parse + structural validation (official helpers)
+  let siwe: ReturnType<typeof parseSiweMessage>;
+  try {
+    siwe = parseSiweMessage(message);
+  } catch {
+    return { ok: false, error: "INVALID_MESSAGE" };
+  }
+  if (!siwe?.address || !siwe.nonce) return { ok: false, error: "INVALID_MESSAGE" };
+  if (!validateSiweMessage({ message: siwe })) return { ok: false, error: "INVALID_MESSAGE" };
+
+  const address = siwe.address as string;
   if (!isValidAddress(address)) return { ok: false, error: "INVALID_ADDRESS" };
 
-  // nonce must exist, be unused, unexpired, and (if pre-bound) match address
-  const rec = await db.nonce.findUnique({ where: { nonce } });
+  // 2. Chain binding — the signed chainId must be our configured Abstract chain
+  if (siwe.chainId !== publicConfig.chainId) return { ok: false, error: "INVALID_CHAIN" };
+
+  // 3. Domain binding — anti cross-domain replay (official check, gateway-aware)
+  const domains = allowedDomains(requestHost);
+  if (!siwe.domain || !domains.has(siwe.domain.toLowerCase())) {
+    return { ok: false, error: "INVALID_DOMAIN" };
+  }
+
+  // 4. Expiration — message must not be expired (nor absurdly long-lived)
+  const now = Date.now();
+  if (siwe.expirationTime) {
+    const exp = siwe.expirationTime.getTime();
+    if (exp <= now) return { ok: false, error: "MESSAGE_EXPIRED" };
+    if (exp - now > MAX_MESSAGE_TTL_MS) return { ok: false, error: "MESSAGE_EXPIRED" };
+  }
+  if (siwe.issuedAt && siwe.issuedAt.getTime() - now > 5 * 60 * 1000) {
+    return { ok: false, error: "BAD_ISSUED_AT" }; // clock skew > 5 min ahead
+  }
+
+  // 5. Nonce — single-use, unexpired, address-bound (our DB hardening)
+  const rec = await db.nonce.findUnique({ where: { nonce: siwe.nonce } });
   if (!rec || rec.usedAt) return { ok: false, error: "NONCE_INVALID" };
-  if (rec.expiresAt.getTime() < Date.now()) return { ok: false, error: "NONCE_EXPIRED" };
-  if (rec.address && rec.address !== address.toLowerCase()) return { ok: false, error: "NONCE_MISMATCH" };
+  if (rec.expiresAt.getTime() < now) return { ok: false, error: "NONCE_EXPIRED" };
+  if (rec.address && rec.address !== address.toLowerCase()) {
+    return { ok: false, error: "NONCE_MISMATCH" };
+  }
 
-  // issuedAt sanity: within +/- 10 minutes
-  const issued = Date.parse(issuedAt);
-  if (!Number.isFinite(issued) || Math.abs(Date.now() - issued) > 10 * 60 * 1000)
-    return { ok: false, error: "BAD_ISSUED_AT" };
-
-  const message = buildAuthMessage({ address, nonce, issuedAt });
-
+  // 6. Signature — official verifySiweMessage (EOA + EIP-1271 smart wallets
+  //    like AGW via on-chain isValidSignature, ERC-6492-aware)
   try {
-    // PublicClient.verifyMessage: supports EOAs AND smart accounts (AGW)
-    // via ERC-6492 / EIP-1271 on-chain isValidSignature — fully trustless.
-    const valid = await chainClient.verifyMessage({
-      address: address as `0x${string}`,
+    const valid = await chainClient.verifySiweMessage({
       message,
       signature,
+      blockTag: "latest",
     });
     if (!valid) return { ok: false, error: "BAD_SIGNATURE" };
   } catch (err) {
@@ -120,9 +203,9 @@ export async function verifyAuth(params: {
     return { ok: false, error: "VERIFICATION_FAILED" };
   }
 
-  // burn nonce (single-use)
+  // 7. Burn the nonce (single-use — atomic claim guards concurrent replays)
   const claimed = await db.nonce.updateMany({
-    where: { nonce, usedAt: null },
+    where: { nonce: siwe.nonce, usedAt: null },
     data: { usedAt: new Date() },
   });
   if (claimed.count === 0) return { ok: false, error: "NONCE_REPLAY" };

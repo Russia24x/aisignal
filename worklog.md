@@ -840,3 +840,80 @@ Stage Summary:
   npm install → wrangler login → d1 create → schema → secret → deploy
 - Open items: none blocking; wagmi stays on v2 (agw-react peer req),
   admin panel / Telegram alerts remain roadmap candidates
+
+---
+Task ID: 17
+Agent: main
+Task: Study all official Abstract docs (12 URLs) + migrate to official SIWE standard + stable-release alignment (user request, Persian)
+
+Work Log:
+- SESSION-START-SYNC-CHECK: cron list = 0 jobs (15-min auto-dev system remains
+  removed — user's standing top-priority directive re-verified); tree clean,
+  local == origin/main (fe0f6ac)
+- RESEARCH (all 12 official URLs via page_reader, saved to .zscripts/absdocs/):
+  docs.abs.xyz/overview, AGW overview, AGW getting-started, AGW native
+  integration, AGW+Privy integration, Abstract JSON-RPC API reference,
+  build.abs.xyz AGW Reusables home, AGW Provider, Connect Wallet Button,
+  SIWE Authentication (full component source incl. server utils),
+  Abstract Profile, Abstract App Voting
+- KEY FINDINGS:
+  * build.abs.xyz = official "AGW Reusables" component library; its SIWE
+    button uses viem/siwe: generateSiweNonce + createSiweMessage
+    (client-side) + parseSiweMessage + validateSiweMessage +
+    publicClient.verifySiweMessage({blockTag:'latest'}) with EIP-1271;
+    server checks chainId, domain-vs-request-host, expirationTime
+  * Our legacy auth was SIWE-*like* but hand-rolled (not parseable EIP-4361,
+    no domain binding on verify, no expirationTime in message)
+  * App Voting component requires a portal-listed appId → NOT applicable
+    (documented decision); AbstractProfile already adapted (Task earlier)
+- MIGRATION to official SIWE (src/lib/security/siwe.ts rewrite):
+  * issueNonce → generateSiweNonce() (official, 96-char)
+  * buildAuthMessage → createSiweMessage() (official EIP-4361; SERVER-side
+    = harder than official demo which builds client-side) with domain/URI
+    from APP_URL, chainId 2741, statement, expirationTime +10 min
+  * verifyAuth({message, signature, requestHost}) → official chain:
+    parseSiweMessage → validateSiweMessage → INVALID_CHAIN check →
+    INVALID_DOMAIN check (APP_URL host ∪ request host, gateway-safe —
+    harder than official's request-host-only) → MESSAGE_EXPIRED check
+    (future + ≤24h ceiling) → DB nonce (single-use/TTL/address-bound —
+    harder than official's session-cookie nonce, D1-compatible) →
+    verifySiweMessage({blockTag:'latest'}) EIP-1271/ERC-6492 → atomic
+    nonce burn
+  * /api/auth/nonce: returns official EIP-4361 message + no-store headers
+  * /api/auth/verify: official body shape {message, signature}
+  * useAuth.signIn: sign server-prepared message → POST {message, signature}
+  * classifyError: new server codes (INVALID_MESSAGE/CHAIN/DOMAIN,
+    MESSAGE_EXPIRED, BAD_ISSUED_AT, NONCE_*) → stable UI codes
+- HEADER (official ConnectWalletButton pattern): PENGU + ETH balance rows
+  in the connected wallet dropdown (wagmi useBalance ×2, mono LTR grid,
+  Snowflake/Fuel icons, localized tooltips)
+- DOCS: WALLET-AND-TRANSACTIONS.md §4 rewritten (official flow comparison
+  table + updated compliance checklist), SECURITY.md §2 rewritten
+  (official SIWE chain with all validations)
+- VERIFICATION (curl + node end-to-end):
+  * nonce → valid EIP-4361 message (domain/URI/chain/nonce/expiry correct)
+  * forged signature → BAD_SIGNATURE 401 ✓
+  * evil-domain message → INVALID_DOMAIN 401 ✓ (cross-domain replay blocked)
+  * wrong-chain message → INVALID_CHAIN 401 ✓
+  * REAL signature (anvil test key): verify 200 + session cookie +
+    /api/auth/session authenticated ✓ + replay of same message+signature →
+    NONCE_INVALID 401 ✓ (nonce burned)
+  * test user + nonces cleaned from dev DB afterwards
+- QA (agent-browser): page loads zero errors/console errors; FA→EN switch
+  OK; Connect Wallet → official portal.abs.xyz popup opened with correct
+  params (requester_public_key, provider_app_id, origin) — NOT blocked;
+  mobile 390px scrollWidth==clientWidth (no overflow); footer at natural
+  bottom (footerBottom==bodyH); all API calls 200 (auth/session,
+  market/overview, signal/preview, signal/history)
+- lint clean, tsc clean, dev.log clean
+
+Stage Summary:
+- Auth is now 100% aligned with the official Abstract SIWE standard
+  (build.abs.xyz component) while keeping our 3 security hardenings:
+  server-built message, DB-backed single-use nonce, dual-domain validation
+- End-to-end signature flow browser+curl verified including replay & forgery
+  attack rejections; header now shows wallet balances per the official
+  ConnectWalletButton pattern
+- App Voting deemed not applicable (needs portal-listed appId) — documented
+- Remaining roadmap candidates: admin panel, Telegram/email alert delivery,
+  KV-based rate limiting for multi-isolate Workers deploy

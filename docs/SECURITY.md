@@ -13,18 +13,22 @@
 
 ---
 
-## ۲. مدل احراز هویت (SIWE روی Abstract)
+## ۲. مدل احراز هویت (SIWE رسمی EIP-4361 روی Abstract)
+
+> کاملاً منطبق با کامپوننت رسمی SIWE Abstract (build.abs.xyz/docs/authentication/siwe-button) — با تقویت‌های اضافی.
 
 ### جریان
-1. `GET /api/auth/nonce?address=…` → nonce تصادفی ۱۶ بایتی (hex)، **یک‌بارمصرف**، TTL ۵ دقیقه، اختیاریِ مقید به آدرس
-2. سرور **کل پیام امضا** را می‌سازد (دامنه، آدرس، بیانیه، URI، نسخه، Chain ID، nonce، Issued At) — کلاینت فقط رله است
-3. کاربر با AGW امضا می‌کند (امضای EIP-1271 اسمارت‌اکانت)
-4. `POST /api/auth/verify` → سرور:
-   - اعتبار nonce (وجود/مصرف‌نشدن/انقضا/تطابق آدرس)
-   - پنجرهٔ زمانی Issued At (±۱۰ دقیقه)
-   - `verifyMessage` با viem مقابل **آدرس اسمارت‌اکانت** — EIP-1271 برای اکانت مستقر، ERC-6492 برای اکانت استقرارنیافته (الگوی رسمی Abstract)
+1. `GET /api/auth/nonce?address=…` → nonce رسمی `generateSiweNonce()` (viem/siwe، ۹۶ کاراکتر)، **یک‌بارمصرف**، TTL ۱۰ دقیقه، اختیاریِ مقید به آدرس + پیام EIP-4361 ساخته‌شده با `createSiweMessage()` (سمت سرور — کلاینت فقط رله است)
+2. کاربر با AGW امضا می‌کند (امضای EIP-1271 اسمارت‌اکانت) — فقط از کلیک (popup-blocker safety)
+3. `POST /api/auth/verify { message, signature }` (شکل رسمی) → سرور:
+   - `parseSiweMessage()` + `validateSiweMessage()` (توابع رسمی viem/siwe)
+   - **اعتبارسنجی Chain ID**: `siwe.chainId === 2741` وگرنه `INVALID_CHAIN`
+   - **اعتبارسنجی Domain (ضد replay بین‌دامنه‌ای)**: دامنهٔ پیام ∈ {APP_URL host، Host درخواست} وگرنه `INVALID_DOMAIN`
+   - **اعتبارسنجی Expiration Time**: پیام منقضی/طولانی نشده باشد (`MESSAGE_EXPIRED`)
+   - اعتبار nonce در DB (وجود/مصرف‌نشدن/انقضا/تطابق آدرس) — سخت‌گیرانه‌تر از نمونهٔ رسمی (session-cookie)
+   - `verifySiweMessage({ blockTag: 'latest' })` با viem مقابل **آدرس اسمارت‌اکانت** — EIP-1271 برای اکانت مستقر، ERC-6492 برای اکانت استقرارنیافته (الگوی رسمی Abstract)
    - burn اتمیک nonce (updateMany با شرط `usedAt: null` → replay غیرممکن)
-5. کوکی سشن HMAC → `httpOnly` + `sameSite=lax` + `secure` در production + TTL ۱۶۸ ساعت
+4. کوکی سشن HMAC → `httpOnly` + `sameSite=lax` + `secure` در production + TTL ۱۶۸ ساعت
 
 ### توکن سشن
 ```
@@ -35,7 +39,7 @@ payload = { sub, addr, iat, exp, jti }
 - payload شامل نقش/ادعایی نیست؛ همهٔ entitlements هر بار از DB خوانده می‌شوند (بدون stale privilege)
 
 ### امضای AGW چرا این‌طور راستی‌آزمایی می‌شود؟
-امضای AGW ساختار EIP-712 (`AGWMessage(bytes32)`) + کدگذاری validator دارد و برای اکانت‌های استقرارنیافته ERC-6492-wrapped است؛ بنابراین ecRecover ساده همیشه نتیجهٔ غلط می‌داد. `verifyMessage` رسمی viem این سه حالت را خودش هندل می‌کند. جزئیات: `docs/WALLET-AND-TRANSACTIONS.md §4`.
+امضای AGW ساختار EIP-712 (`AGWMessage(bytes32)`) + کدگذاری validator دارد و برای اکانت‌های استقرارنیافته ERC-6492-wrapped است؛ بنابراین ecRecover ساده همیشه نتیجهٔ غلط می‌داد. `verifySiweMessage` رسمی viem این سه حالت را خودش هندل می‌کند. جزئیات: `docs/WALLET-AND-TRANSACTIONS.md §4`.
 
 ---
 

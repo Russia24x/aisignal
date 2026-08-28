@@ -4,13 +4,19 @@
  * Auth bridge: wallet connection (wagmi/AGW) ⇄ server session.
  *
  * Flow (popup-safe — follows the official AGW integration pattern from
- * docs.abs.xyz / Abstract-Foundation examples):
+ * docs.abs.xyz / build.abs.xyz, and the official SIWE component):
  *  1. `login()` opens the AGW connect popup — ALWAYS from a click handler.
  *  2. `signIn()` (also click-triggered only) fetches a server-prepared
- *     message (nonce-bound), asks the wallet to sign it in the AGW popup,
- *     and posts the signature to /api/auth/verify — establishing an HMAC
- *     session cookie.
+ *     EIP-4361 SIWE message (single-use nonce, domain+chain bound), asks the
+ *     wallet to sign it in the AGW popup, and posts {message, signature} to
+ *     /api/auth/verify — establishing an HMAC session cookie.
  *  3. `session` exposes server-side entitlements (paid access state).
+ *
+ * Official reference (SIWE button):
+ *   https://build.abs.xyz/docs/authentication/siwe-button
+ * The server prepares the exact message (createSiweMessage from viem/siwe),
+ * so this hook only relays it to the wallet — exactly like the official
+ * demo's Step 2/3, minus the client-side message assembly (a hardening).
  *
  * POPUP-BLOCKER SAFETY (root-cause fix, per official docs + SDK source):
  *  - Every AGW action (connect / sign / transact) opens a 440×680 popup via
@@ -91,9 +97,22 @@ function classifyError(err: unknown, serverCode?: string): SignInErrorCode {
   // AGW SDK: no wallet response within TWO_MINUTES_IN_MS ("Request timeout"
   // / "Authorization request timed out after ... ms.").
   if (raw.includes("Request timeout") || raw.includes("timed out")) return "TIMEOUT";
+  // Official SIWE server-side rejections (build.abs.xyz semantics):
+  // malformed/expired message, wrong chain/domain, bad nonce, bad signature.
   if (
     serverCode === "INVALID_SIGNATURE" ||
     serverCode === "VERIFY_FAILED" ||
+    serverCode === "BAD_SIGNATURE" ||
+    serverCode === "VERIFICATION_FAILED" ||
+    serverCode === "NONCE_INVALID" ||
+    serverCode === "NONCE_EXPIRED" ||
+    serverCode === "NONCE_REPLAY" ||
+    serverCode === "NONCE_MISMATCH" ||
+    serverCode === "INVALID_MESSAGE" ||
+    serverCode === "BAD_ISSUED_AT" ||
+    serverCode === "MESSAGE_EXPIRED" ||
+    serverCode === "INVALID_CHAIN" ||
+    serverCode === "INVALID_DOMAIN" ||
     raw.includes("NONCE_FAILED")
   ) {
     return "SIGNATURE_FAILED";
@@ -175,10 +194,13 @@ export function useAuth() {
         return { ok: false, errorCode: code };
       };
       try {
+        // Step 1 (official SIWE flow): fetch a server-prepared EIP-4361
+        // message bound to a single-use nonce, our domain and our chain.
         const nonceRes = await fetch(`/api/auth/nonce?address=${address}`);
         const nonceData = await nonceRes.json();
         if (!nonceData.ok) return fail(classifyError(null, nonceData.error ?? "NONCE_FAILED"));
 
+        // Step 2: sign the exact server-controlled message (click gesture).
         let signature: string;
         try {
           signature = await signMessageAsync({ message: nonceData.message });
@@ -186,15 +208,12 @@ export function useAuth() {
           return fail(classifyError(sigErr));
         }
 
+        // Step 3 (official shape): POST { message, signature } for
+        // parseSiweMessage + verifySiweMessage (EIP-1271 aware) server-side.
         const verifyRes = await fetch("/api/auth/verify", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            address,
-            nonce: nonceData.nonce,
-            issuedAt: nonceData.issuedAt,
-            signature,
-          }),
+          body: JSON.stringify({ message: nonceData.message, signature }),
         });
         const verifyData = await verifyRes.json();
         if (!verifyData.ok) return fail(classifyError(null, verifyData.error ?? "VERIFY_FAILED"));

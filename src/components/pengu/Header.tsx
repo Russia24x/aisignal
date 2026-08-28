@@ -6,6 +6,7 @@
  * @module components/pengu/Header
  */
 import { useState } from "react";
+import { useBalance } from "wagmi";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
 import { useMarket, fmt } from "./useMarket";
@@ -16,7 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Copy, ExternalLink, Globe, Loader2, LogOut, PenLine, Snowflake, TriangleAlert, Wallet } from "lucide-react";
+import { ChevronDown, Copy, ExternalLink, Fuel, Globe, Loader2, LogOut, PenLine, Snowflake, TriangleAlert, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { publicConfig } from "@/lib/public-config";
 import { AbstractProfile } from "@/components/abstract/AbstractProfile";
@@ -27,6 +28,18 @@ export function Header() {
   const { address, entitlements, signingIn, login, signIn, signOut, walletStatus, chainId, needsSignIn } = useAuth();
   const { data } = useMarket();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Wallet balances for the dropdown (official ConnectWalletButton pattern —
+  // build.abs.xyz/docs/authentication/connect-wallet-button shows the
+  // connected wallet's balance alongside the address).
+  const { data: ethBalance } = useBalance({ address });
+  const { data: penguBalance } = useBalance({
+    address,
+    token: publicConfig.penguToken,
+    chainId: publicConfig.chainId,
+  });
+  const fmtBal = (v: bigint | undefined, d = 4) =>
+    v === undefined ? null : (Number(v) / 1e18).toLocaleString("en-US", { maximumFractionDigits: d });
 
   // AGW is Abstract-only by design, but wagmi still reports the connected
   // chain — surface a warning if it ever drifts from the configured chain
@@ -129,6 +142,27 @@ export function Header() {
               <div className="px-2 py-1.5 text-xs text-muted-foreground">
                 {entitlements.signalAccess ? "✅ " : "🔒 "}
                 {t("nav.dashboard")}
+              </div>
+              {/* Balances — official ConnectWalletButton pattern */}
+              <div
+                className="mx-1 mb-1 grid grid-cols-2 gap-1 rounded-lg border border-border/60 bg-card/60 p-2"
+                dir="ltr"
+                aria-label={t("dashboard.penguBalance")}
+              >
+                <span className="flex items-center gap-1.5 text-[11px] font-bold" title={t("dashboard.penguBalance")}>
+                  <Snowflake className="size-3.5 shrink-0 text-primary" />
+                  <span className="font-mono">
+                    {fmtBal(penguBalance?.value) ?? "—"}
+                  </span>
+                  <span className="text-muted-foreground">PENGU</span>
+                </span>
+                <span className="flex items-center gap-1.5 text-[11px] font-bold" title={t("dashboard.ethBalance")}>
+                  <Fuel className="size-3.5 shrink-0 text-amber-500" />
+                  <span className="font-mono">
+                    {fmtBal(ethBalance?.value) ?? "—"}
+                  </span>
+                  <span className="text-muted-foreground">ETH</span>
+                </span>
               </div>
               <DropdownMenuItem
                 className="gap-2"

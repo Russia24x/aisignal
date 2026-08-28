@@ -111,25 +111,40 @@ set-cookie: pengu_session (HMAC) → entitlements فعال می‌شود
 
 ---
 
-## ۴. امضای پیام (SIWE) — الگوی EIP-1271
+## ۴. امضای پیام (SIWE رسمی EIP-4361) — الگوی EIP-1271
 
 امضای AGW یک **امضای اسمارت‌اکانت (EIP-1271)** است، نه `personal_sign` سادهٔ EOA:
 
 - ساختار داخلی: امضای EIP-712 با دامنهٔ `{name:"AbstractGlobalWallet", version:"1.0.0"}` و نوع `AGWMessage(bytes32 signedHash)` + کدگذاری validator (`0x74b9ae28…`) — و در صورت استقرارنیافتن بودن اکانت، با **ERC-6492** پیچیده می‌شود.
-- بنابراین **راستی‌آزمایی باید مقابل آدرس اسمارت‌اکانت انجام شود** (نه EOA) — دقیقاً همان الگوی مثال رسمی `agw-signing-messages`:
+- بنابراین **راستی‌آزمایی باید مقابل آدرس اسمارت‌اکانت انجام شود** (نه EOA) — دقیقاً همان الگوی کامپوننت رسمی SIWE در build.abs.xyz:
 
 ```ts
-// سرور — src/lib/security/siwe.ts
-const valid = await chainClient.verifyMessage({
-  address,     // آدرس AGW (اسمارت‌اکانت)
-  message,     // پیام ساخته‌شده توسط سرور
-  signature,   // امضای برگشتی کیف پول
+// سرور — src/lib/security/siwe.ts (الگوی رسمی)
+const valid = await chainClient.verifySiweMessage({
+  message,    // پیام EIP-4361 کامل (سرور ساخته)
+  signature,  // امضای برگشتی کیف پول
+  blockTag: "latest", // پشتیبانی EIP-1271 اسمارت‌والت‌ها (AGW)
 });
 ```
 
 `viem` خودش تشخیص می‌دهد که در آدرس قرارداد وجود دارد → `isValidSignature` (EIP-1271) را صدا می‌زند و برای اکانت‌های استقرارنیافته از verifier ERC-6492 (`0xfB688330…`) استفاده می‌کند. **ecRecover دستی ممنوع** — امضا ساختار EIP-712/1271 دارد و بازیابی سادهٔ کلید نتیجهٔ اشتباه می‌دهد.
 
-محتوای پیام (فرمت EIP-4361-مانند): دامنه، آدرس، بیانیه، URI، نسخه، Chain ID، nonce (یک‌بارمصرف، TTL ۵ دقیقه)، Issued At (پنجرهٔ ±۱۰ دقیقه). پیام **کاملاً توسط سرور ساخته می‌شود**؛ کلاینت فقط آن را به کیف پول می‌دهد.
+### فلو رسمی (کاملاً منطبق با کامپوننت رسمی SIWE دات build.abs.xyz)
+
+| مرحله | ما | مرجع رسمی |
+|---|---|---|
+| تولید nonce | `generateSiweNonce()` از `viem/siwe` (۹۶ کاراکتر) | همان تابع رسمی |
+| ساخت پیام | `createSiweMessage()` از `viem/siwe` با domain/address/statement/URI/version/chainId/nonce/issuedAt/expirationTime — **سمت سرور** (سخت‌گیرانه‌تر از نمونهٔ رسمی که کلاینت می‌سازد) | همان تابع رسمی |
+| امضا | `signMessageAsync({ message })` فقط از کلیک | الگوی رسمی |
+| ارسال | `POST /api/auth/verify { message, signature }` | همان شکل رسمی |
+| پارس | `parseSiweMessage()` + `validateSiweMessage()` | همان توابع رسمی |
+| اعتبارسنجی زنجیره | `siwe.chainId === 2741` وگرنه `INVALID_CHAIN` | همان چک رسمی |
+| اعتبارسنجی دامنه | `siwe.domain` ∈ {APP_URL host، Host درخواست} وگرنه `INVALID_DOMAIN` (ضد replay بین‌دامنه‌ای) | همان چک رسمی (+ سازگار با گیت‌وی) |
+| انقضای پیام | `expirationTime` در آینده (سقف ۲۴ ساعت) | همان چک رسمی (با TTL کوتاه‌تر: ۱۰ دقیقه) |
+| راستی‌آزمایی امضا | `verifySiweMessage({ blockTag: 'latest' })` | همان تابع رسمی |
+| nonce | ذخیره در **DB** (یک‌بارمصرف + TTL + اتصال به آدرس) — سخت‌گیرانه‌تر از session-cookie نمونهٔ رسمی، سازگار با D1 | ارتقای امنیتی ما |
+
+محتوای پیام: فرمت استاندارد کامل EIP-4361 — دامنه، آدرس، بیانیه، URI، نسخه، Chain ID، nonce (یک‌بارمصرف، TTL ۱۰ دقیقه)، Issued At، Expiration Time. پیام **کاملاً توسط سرور ساخته می‌شود**؛ کلاینت فقط آن را به کیف پول می‌دهد.
 
 ---
 
@@ -226,15 +241,19 @@ idle ── «پرداخت از کیف پول» ──► sending ──(hash)�
 |---|---|
 | Provider رسمی + chain از `viem/chains` | ✅ منطبق |
 | `login()` فقط در کلیک‌هندلر | ✅ منطبق |
-| **امضا فقط از کلیک (الگوی مثال رسمی agw-signing-messages) — بدون signIn خودکار از effect** | ✅ رفع ریشه‌ای بلاک‌شدن پاپ‌آپ (این بازبینی) |
-| **پیش‌گرم‌سازی پروایدر AGW بعد از mount (fetch auth.privy.io)** | ✅ اضافه شد (این بازبینی) |
+| **امضا فقط از کلیک (الگوی مثال رسمی agw-signing-messages) — بدون signIn خودکار از effect** | ✅ رفع ریشه‌ای بلاک‌شدن پاپ‌آپ |
+| **پیش‌گرم‌سازی پروایدر AGW بعد از mount (fetch auth.privy.io)** | ✅ اضافه شد |
+| **SIWE کاملاً رسمی EIP-4361: `generateSiweNonce` + `createSiweMessage` + `parseSiweMessage` + `validateSiweMessage` + `verifySiweMessage` از `viem/siwe`** | ✅ مهاجرت کامل (این بازبینی — طبق build.abs.xyz/docs/authentication/siwe-button) |
+| **اعتبارسنجی chain + domain + expirationTime روی پیام امضاشده (ضد replay بین‌دامنه‌ای — چک‌های رسمی)** | ✅ اضافه شد (INVALID_CHAIN / INVALID_DOMAIN / MESSAGE_EXPIRED) |
 | امضا با `signMessageAsync` و راستی‌آزمایی EIP-1271 مقابل آدرس اسمارت‌اکانت | ✅ منطبق |
-| nonce یک‌بارمصرف + پیام ساخته‌شده توسط سرور | ✅ منطبق |
+| nonce یک‌بارمصرف (DB-backed) + پیام ساخته‌شده توسط سرور | ✅ منطبق (سخت‌گیرانه‌تر از نمونهٔ رسمی) |
+| **بالانس کیف پول در هدر (الگوی رسمی ConnectWalletButton)** | ✅ اضافه شد (PENGU + ETH در دراپ‌داون) |
 | ERC-20 `transfer` با `erc20Abi` + `parseUnits(…, 18)` | ✅ منطبق |
 | انتظار رسید با `useWaitForTransactionReceipt` | ✅ منطبق (+ تأیید خودکار) |
 | راستی‌آزمایی سرور: receipt + لاگ Transfer + replay protection | ✅ منطبق |
-| هشدار ETH-for-gas (تراکنش‌ها اسپانسر نیستند) | ✅ اضافه شد (این ممیزی) |
-| مدیریت خطاهای popup (4001 / بلاک / تایم‌اوت) | ✅ اضافه شد (این ممیزی) |
+| هشدار ETH-for-gas (تراکنش‌ها اسپانسر نیستند) | ✅ اضافه شد |
+| مدیریت خطاهای popup (4001 / بلاک / تایم‌اوت) | ✅ اضافه شد |
 | wagmi روی v2 (نه v3) | ✅ |
 | آدرس PENGU رسمی + ۱۸ اعشار | ✅ راستی‌آزمایی روی زنجیره |
 | آدرس‌های abscan.org / abs.xyz | ✅ منطبق |
+| AbstractProfile با tier رنگی (الگوی رسمی Abstract Profile) | ✅ منطبق (build.abs.xyz/docs/abstract-portal/abstract-profile) |
