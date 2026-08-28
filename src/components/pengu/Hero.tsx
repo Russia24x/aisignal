@@ -6,8 +6,10 @@
  * @module components/pengu/Hero
  */
 import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { useMarket, fmt } from "./useMarket";
+import { ShareButton } from "./ShareButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowDown, LineChart, RefreshCw, Snowflake } from "lucide-react";
@@ -18,12 +20,18 @@ export function Hero() {
   const { data, loading, refresh } = useMarket();
 
   const s = data?.snapshot;
-  const stats = [
-    { label: t("hero.statPrice"), value: fmt.price(s?.priceUsd), accent: true },
-    { label: t("hero.statChange24h"), value: fmt.pct(s?.change24h), up: (s?.change24h ?? 0) >= 0 },
-    { label: t("hero.statVolume"), value: fmt.usd(s?.volume24hUsd) },
-    { label: t("hero.statLiquidity"), value: fmt.usd(s?.liquidityUsd) },
-    { label: t("hero.statMcap"), value: fmt.usd(s?.marketCapUsd ?? s?.fdvUsd) },
+  const stats: Array<{
+    label: string;
+    raw: number | undefined;
+    format: (v: number) => string;
+    accent?: boolean;
+    up?: boolean;
+  }> = [
+    { label: t("hero.statPrice"), raw: s?.priceUsd, format: (v) => fmt.price(v), accent: true },
+    { label: t("hero.statChange24h"), raw: s?.change24h, format: (v) => fmt.pct(v), up: (s?.change24h ?? 0) >= 0 },
+    { label: t("hero.statVolume"), raw: s?.volume24hUsd, format: (v) => fmt.usd(v) },
+    { label: t("hero.statLiquidity"), raw: s?.liquidityUsd, format: (v) => fmt.usd(v) },
+    { label: t("hero.statMcap"), raw: s?.marketCapUsd ?? s?.fdvUsd ?? undefined, format: (v) => fmt.usd(v) },
   ];
 
   return (
@@ -76,32 +84,15 @@ export function Hero() {
                 <ArrowDown className="size-4" />
               </Button>
             </a>
+            {/* viral loop: share the live snapshot + today's consensus */}
+            <ShareButton />
           </div>
 
           {/* stats row — the 5th card spans the full row on mobile so the
               2-col grid never leaves an orphan cell */}
           <div className="mt-9 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {stats.map((st, i) => (
-              <div
-                key={st.label}
-                className={cn(
-                  "glass-card group px-3.5 py-3 transition-transform hover:-translate-y-0.5 hover:bg-card/80",
-                  i === stats.length - 1 && "col-span-2 sm:col-span-1",
-                )}
-              >
-                <div className="text-[11px] font-medium text-muted-foreground">{st.label}</div>
-                <div
-                  dir="ltr"
-                  className={cn(
-                    "mt-1 font-mono text-sm font-bold tracking-tight transition-colors",
-                    st.accent && "text-primary",
-                    st.up === true && "text-buy",
-                    st.up === false && "text-sell",
-                  )}
-                >
-                  {loading ? "···" : st.value}
-                </div>
-              </div>
+              <StatCard key={st.label} stat={st} loading={loading} span={i === stats.length - 1} />
             ))}
           </div>
 
@@ -155,6 +146,87 @@ export function Hero() {
 function localeTime(t: (k: string) => string): string {
   // fa → fa-IR numerals with Persian digits handled by Intl
   return t("brand.name").includes("پنگو") ? "fa-IR" : "en-US";
+}
+
+/* ------------------------------------------------------------------ */
+/* StatCard — live value with a one-time count-up entrance             */
+/* ------------------------------------------------------------------ */
+
+interface StatDef {
+  label: string;
+  raw: number | undefined;
+  format: (v: number) => string;
+  accent?: boolean;
+  up?: boolean;
+}
+
+/**
+ * Count-up: animates 0 → target ONCE (first data arrival); later
+ * refreshes snap to the new value instantly (the tick-up/tick-down
+ * colour flash already covers live changes). Reduced motion → snap.
+ */
+function useCountUp(target: number | undefined, durationMs = 900): number | undefined {
+  const [value, setValue] = useState<number | undefined>(undefined);
+  const firstRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (target === undefined || !Number.isFinite(target)) return;
+
+    if (
+      firstRef.current !== null ||
+      (typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+    ) {
+      // subsequent refresh or reduced motion — snap on the next frame
+      // (async to avoid a synchronous cascading render)
+      firstRef.current = target;
+      const raf = requestAnimationFrame(() => setValue(target));
+      return () => cancelAnimationFrame(raf);
+    }
+
+    firstRef.current = target;
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const p = Math.min((now - start) / durationMs, 1);
+      const eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
+      setValue(target * eased);
+      if (p < 1) raf = requestAnimationFrame(tick);
+      else setValue(target);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, durationMs]);
+
+  return target === undefined ? undefined : value;
+}
+
+function StatCard({ stat, loading, span }: { stat: StatDef; loading: boolean; span?: boolean }) {
+  const animated = useCountUp(stat.raw);
+  const ready = !loading && stat.raw !== undefined && animated !== undefined;
+
+  return (
+    <div
+      className={cn(
+        "glass-card group px-3.5 py-3 transition-transform hover:-translate-y-0.5 hover:bg-card/80",
+        span && "col-span-2 sm:col-span-1",
+      )}
+    >
+      <div className="text-[11px] font-medium text-muted-foreground">{stat.label}</div>
+      <div
+        dir="ltr"
+        className={cn(
+          "mt-1 font-mono text-sm font-bold tracking-tight transition-colors",
+          stat.accent && "text-primary",
+          stat.up === true && "text-buy",
+          stat.up === false && "text-sell",
+          ready && "count-pop tabular-nums",
+        )}
+      >
+        {ready ? stat.format(animated!) : loading ? "···" : "—"}
+      </div>
+    </div>
+  );
 }
 
 /** Compact sparkline of last 30 daily closes. */

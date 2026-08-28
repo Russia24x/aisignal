@@ -23,6 +23,7 @@ import { PriceAlerts } from "@/components/pengu/PriceAlerts";
 import { TrackRecord } from "@/components/pengu/TrackRecord";
 import { EngineSection } from "@/components/pengu/EngineSection";
 import { FaqSection, Footer } from "@/components/pengu/FaqFooter";
+import { Reveal } from "@/components/pengu/Reveal";
 
 export default function Home() {
   return (
@@ -36,14 +37,26 @@ export default function Home() {
 
       <main className="flex-1">
         <Hero />
-        <PriceChart />
-        <SignalSection />
+        <Reveal>
+          <PriceChart />
+        </Reveal>
+        <Reveal delay={60}>
+          <SignalSection />
+        </Reveal>
         <MyDashboard />
-        <PricingSection />
+        <Reveal delay={60}>
+          <PricingSection />
+        </Reveal>
         <PriceAlerts />
-        <TrackRecord />
-        <EngineSection />
-        <FaqSection />
+        <Reveal>
+          <TrackRecord />
+        </Reveal>
+        <Reveal delay={60}>
+          <EngineSection />
+        </Reveal>
+        <Reveal delay={120}>
+          <FaqSection />
+        </Reveal>
       </main>
 
       <Footer />

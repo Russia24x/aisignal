@@ -1391,3 +1391,64 @@ Stage Summary:
   USER's browser cannot reach portal.abs.xyz itself, no client-side
   fix can help (the wallet lives there) — but the error feedback now
   says so immediately instead of hanging
+
+---
+Task ID: 24
+Agent: main (15-min webDevReview cron round)
+Task: Scheduled review — QA passed clean, so delivered the "Growth & Delight" package: ShareButton (viral loop), scroll-reveal animations, count-up hero stats
+
+Work Log:
+- SESSION-START-SYNC-CHECK (per RULES.md): tree clean, local == origin/main (c135ec3), no force push
+- STATUS ASSESSMENT: homepage 200, /api/agw/details serving (cache), /api health ok,
+  0 errors in dev.log, browser QA 0 live page errors, 29 sections rendered.
+  DB state: 1 signal (OPEN), 1 verified payment (22.09 PENGU), 2 users, 0 alerts.
+  Auth/wallet chain from Task 23 stable → phase judged stable → new-feature round
+- NEW ShareButton (src/components/pengu/ShareButton.tsx):
+  * self-contained: reads live DexScreener snapshot (useMarket) + fetches the
+    public signal preview (consensus only — the verdict stays paywalled)
+  * dropdown: native Web Share API (when available) / X intent / Telegram
+    share / copy message+link; copy shows the existing localized toast
+  * share text is LIVE and bilingual (fa/en) — e.g. EN:
+    "🐧 Daily PENGU signals — PenguSignals / PENGU $0.00906 (-6.7% 24h) /
+    Today's consensus: 6/11 indicators bullish 📊 / Built on Abstract ⛓️"
+  * new i18n share.* keys (fa + en); fixed a double-$ blemish in the FA
+    template (fmt.price already includes the $)
+- NEW Reveal component (src/components/pengu/Reveal.tsx):
+  * IntersectionObserver-based entrance (fade + rise + de-blur, once),
+    content rendered from the start (SEO/print safe)
+  * above-the-fold content reveals next frame (no flash); honours
+    prefers-reduced-motion (instant show)
+  * applied in page.tsx to PriceChart, SignalSection, PricingSection,
+    TrackRecord, EngineSection, FaqSection with staggered delays
+- Count-up hero stats (Hero.tsx):
+  * stats restructured to raw values + formatters; new useCountUp hook
+    animates 0 → target once (easeOutCubic, 900ms); later refreshes snap
+    (tick-up/tick-down colour flash already covers live changes)
+  * reduced-motion → snap; .count-pop entrance CSS + tabular-nums
+- Fixed lint rule react-hooks/set-state-in-effect in both new hooks by
+  deferring the synchronous snap branch to requestAnimationFrame
+- QA (agent-browser):
+  * reveal: 6/6 wrappers flipped to reveal-in after scrolling to bottom;
+    1 already visible at top (above-fold path)
+  * share: dropdown opens (FA + EN), X/Telegram hrefs carry the real live
+    text + URL (verified decoded), copy → "کپی شد!" toast
+  * count-up: 5/5 stat cards render live values with count-pop class
+  * fresh session: 0 live page errors; mobile 390px zero overflow, footer
+    at natural bottom (8418 == doc height); locale switch FA↔EN works
+  * VLM review (desktop FA/RTL): 9/10 polish — share button visible,
+    all 5 stats legible with correct colour coding, no overlap/clipping,
+    RTL correct
+- lint clean, tsc clean (src/), dev.log clean
+
+Stage Summary:
+- Growth loop: users can now share a live snapshot (price + consensus +
+  link) to X/Telegram/any app — free user acquisition channel built on
+  data that is already public
+- Delight: page sections now enter with a soft fade/rise/de-blur on
+  scroll; hero stats count up on first load — both fully reduced-motion
+  safe and SEO-safe
+- All QA green: 0 errors, mobile clean, bilingual share verified
+- Next-phase candidates: signal-outcome backfill needs live days to
+  accumulate (TrackRecord fills itself); email/Telegram notification
+  delivery for price alerts (needs outbound channel decision); consider
+  a "platform pulse" stats strip once payment count grows beyond 1

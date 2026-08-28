@@ -302,5 +302,12 @@
     "firedToastDesc": "The live price reached your target. Check your alert for details.",
     "triggeredHistory": "Triggered history",
     "proximity": "Proximity"
+  },
+  "share": {
+    "title": "Share",
+    "native": "Share…",
+    "onX": "Share on X",
+    "onTelegram": "Share on Telegram",
+    "copy": "Copy message + link"
   }
 }
