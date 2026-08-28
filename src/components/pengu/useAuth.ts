@@ -27,10 +27,20 @@ const log = createLogger("auth");
 
 export type { Entitlements };
 
-/** Stable sign-in failure codes → localized via `wallet.error.*` keys. */
+/**
+ * Stable sign-in failure codes → localized via `wallet.error.*` keys.
+ *
+ * POPUP_BLOCKED / TIMEOUT map the AGW cross-app-connect popup semantics:
+ * the wallet UI is a 440×680 `window.open` popup that browsers may block
+ * (it opens after async SDK work, so the click's user-activation can
+ * expire) and that auto-closes after a 2-minute request timeout.
+ * See docs/WALLET-AND-TRANSACTIONS.md § Troubleshooting.
+ */
 export type SignInErrorCode =
   | "RATE_LIMITED"
   | "SIGNATURE_REJECTED"
+  | "POPUP_BLOCKED"
+  | "TIMEOUT"
   | "SIGNATURE_FAILED"
   | "NETWORK";
 
@@ -50,9 +60,23 @@ interface SessionState {
 function classifyError(err: unknown, serverCode?: string): SignInErrorCode {
   const raw = String(err?.toString?.() ?? err ?? "");
   if (serverCode === "RATE_LIMITED" || raw.includes("RATE_LIMITED")) return "RATE_LIMITED";
-  if (raw.includes("UserRejected") || raw.includes("rejected the request")) {
+  // wagmi wraps EIP-1193 4001 as UserRejectedRequestError; the raw AGW
+  // cross-app-connect SDK throws Error("User rejected request") when the
+  // user closes the popup — cover both spellings.
+  if (raw.includes("UserRejected") || raw.includes("User rejected")) {
     return "SIGNATURE_REJECTED";
   }
+  // AGW SDK: window.open returned null (popup blocker) — the SDK's own
+  // error string is "Failed to initialize request".
+  if (
+    raw.includes("Failed to initialize request") ||
+    raw.includes("popup") && raw.includes("blocked")
+  ) {
+    return "POPUP_BLOCKED";
+  }
+  // AGW SDK: no wallet response within TWO_MINUTES_IN_MS ("Request timeout"
+  // / "Authorization request timed out after ... ms.").
+  if (raw.includes("Request timeout") || raw.includes("timed out")) return "TIMEOUT";
   if (
     serverCode === "INVALID_SIGNATURE" ||
     serverCode === "VERIFY_FAILED" ||

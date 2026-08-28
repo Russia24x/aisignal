@@ -38,6 +38,8 @@
 
 پرداخت با ترانسفر معمولی ERC-20 به آدرس خزانه انجام می‌شود و **فقط هش تراکنش** به سرور ارسال می‌شود — تأیید کامل روی زنجیره Abstract و سمت سرور، بدون Session Key و بدون approval. جزئیات کامل: `docs/ACCESS-MODEL.md`.
 
+> 📖 **راهنمای پرداخت برای کاربران:** دیالوگ پرداخت علاوه بر مسیر کیف پول، مسیر «قبلاً پرداخت کرده‌اید؟» (ورود دستی هش) و نمایش موجودی ETH برای کارمزد را دارد. رفع اشکال‌های رایج (پاپ‌آپ بلاک، تایم‌اوت، کارمزد) در `docs/WALLET-AND-TRANSACTIONS.md §8`.
+
 ## 🚀 اجرای محلی
 
 ```bash
@@ -67,7 +69,10 @@ src/
 │       ├── auth/                 # nonce / verify / session (SIWE)
 │       ├── market/overview/      # داده زنده بازار (رایگان)
 │       ├── signal/               # preview (رایگان) / today (پولی) / history
-│       └── payment/              # config / verify / history
+│       ├── payment/verify/       # تأیید on-chain پرداخت
+│       ├── me/dashboard/         # داشبورد کاربر
+│       ├── alerts/               # هشدار قیمت (CRUD)
+│       └── user-profile/         # پروفایل پرتال Abstract (پروکسی cache)
 ├── lib/
 │   ├── config.ts                 # کانفیگ سرور (zod-validated، fail-fast)
 │   ├── public-config.ts          # کانفیگ کلاینت (NEXT_PUBLIC_*)
@@ -90,6 +95,21 @@ src/
 
 جزئیات کامل: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
+### 📚 فهرست مستندات
+
+| سند | محتوا |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | معماری کل سیستم و جریان‌های اصلی |
+| [SECURITY.md](docs/SECURITY.md) | مدل تهدید، سشن، rate limit، مدل اعتماد پرداخت |
+| [API.md](docs/API.md) | مرجع کامل endpointها (متدها، خطاها، مدل داده) |
+| [WALLET-AND-TRANSACTIONS.md](docs/WALLET-AND-TRANSACTIONS.md) | کیف پول/امضا/تراکنش — مبتنی بر مستندات رسمی Abstract |
+| [TECH-STACK.md](docs/TECH-STACK.md) | فناوری‌ها، نسخه‌ها، دلیل انتخاب‌ها |
+| [BACKEND.md](docs/BACKEND.md) | راهنمای توسعه‌دهندهٔ سرور |
+| [FRONTEND.md](docs/FRONTEND.md) | راهنمای توسعه‌دهندهٔ کلاینت (کامپوننت‌ها، RTL، i18n) |
+| [ACCESS-MODEL.md](docs/ACCESS-MODEL.md) | مدل دسترسی و تعرفهٔ پاس‌ها |
+| [AUDIT.md](docs/AUDIT.md) | گزارش ممیزی کامل + نتایج QA |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | استقرار (Cloudflare) |
+
 ## 🔒 امنیت
 
 امنیت اولویت اول، دوم و سوم این پلتفرم است:
@@ -99,6 +119,8 @@ src/
 3. **اعتبارسنجی ورودی** — همه ورودی‌های API با zod
 4. **Rate limiting** — روی همه endpoint ها
 5. **Zero client trust** — هیچ تصمیم امنیتی سمت کلاینت نیست
+
+جزئیات کامل: [`docs/SECURITY.md`](docs/SECURITY.md) — گزارش ممیزی دورهٔ اخیر: [`docs/AUDIT.md`](docs/AUDIT.md)
 
 ## ☁️ استقرار روی Cloudflare (رایگان، بدون کارت اعتباری)
 

@@ -539,3 +539,100 @@ Stage Summary:
   left untouched
 - Next candidates: P1 alerts/notification delivery, signal history pagination
   in UI, admin panel; P2 Telegram/email alerts, user settings; P3 Cloudflare
+
+---
+Task ID: 13
+Agent: main
+Task: Complete project documentation (architecture/security/methods/stack/backend/frontend) + full audit + fix wallet connection, popup modal & transaction issues per official Abstract/AGW docs + functional testing
+
+Work Log:
+- SESSION-START-SYNC-CHECK: fetched origin, tree clean, in sync with origin/main
+- OFFICIAL DOCS RESEARCH (~25 pages: docs.abs.xyz via llms.txt/.md, build.abs.xyz,
+  AGW SDK source, npm registry, live RPC calls):
+  * AGW connect/tx UI = 440x680 window.open popup; strings: "User rejected
+    request" (EIP-1193 4001), "Failed to initialize request" (popup blocked),
+    "Request timeout" (2-min); popup must open from user gesture (activation
+    can expire during SDK's async first-connect fetch)
+  * AGW signatures are EIP-1271 typed (AGWMessage EIP-712 + validator, ERC-6492
+    when undeployed) — must verify against SMART ACCOUNT address (we already do)
+  * Plain ERC-20 transfers are NOT gas-sponsored (only AGW deployment is) —
+    user needs ETH for gas
+  * PENGU 0x9eBe3A824Ca958e4b3Da772D2065518F009CBa62 verified on-chain (18
+    decimals); Transfer topic0 recomputed = match; abscan.org URLs confirmed
+  * Versions: agw-react 1.13.0 (latest) OK; wagmi must STAY v2 (peer ^2.17.5);
+    viem 2.56.0 OK; old agw-sdk repo ARCHIVED (active: abstract-packages)
+  * docs quickstart URL is dead -> /getting-started (referenced in our docs)
+- AUDIT RESULT: 10/10 core patterns already compliant (provider, signing,
+  verification, token, explorer). 8 real issues found:
+  1. popup/timeout SDK errors misclassified as NETWORK (useAuth classifyError)
+  2. no ETH-for-gas awareness in PaymentDialog
+  3. TX_PENDING dead code (route mapped 202 but lib never returned it)
+  4. no auto-verify after on-chain receipt
+  5. no "already paid" manual-hash path in idle phase
+  6. failed manual verify jumped phase to "sent" (wrong UI state)
+  7. wallet.wrongNetwork i18n key unused — no chainId guard in Header
+  8. verify button enabled before receipt (premature TX_NOT_FOUND UX)
+- FIXES IMPLEMENTED (all 8):
+  * useAuth: new stable codes POPUP_BLOCKED + TIMEOUT; both "UserRejected"/
+    "User rejected" spellings covered
+  * PaymentDialog v3: ETH gas row + red zero-gas warning; classifySendError
+    (rejected/popup_blocked/timeout/insufficient_balance/send_failed);
+    auto-verify on receipt success (ref-guarded); verify disabled while
+    wallet-tx receipt pending; "already paid? enter tx hash" manual path
+    (reuses orphaned submitTx key); failed manual verify returns to manual
+    form (phase logic fixed); confirmed/reverted receipt indicators
+  * payments.ts inspectTransfer: getTransaction probe -> TX_PENDING (202) for
+    known-but-unmined txs vs TX_NOT_FOUND (404)
+  * Header: wrong-network pill (#chainId + tooltip) when chainId != 2741
+  * i18n fa+en: wallet.error.POPUP_BLOCKED/TIMEOUT, payment.gasLabel/gasHint/
+    noGas/confirmed/waitingConfirmation/alreadyPaid, payment.errors.
+    insufficient_balance/send_failed
+- QA (agent-browser, forged HMAC session for treasury user — quoted-secret
+  .env parsing bug in forge script found & fixed):
+  * homepage renders, no console/page errors; pricing 0/10/63/240/2,555/
+    5,110 + discount badges all present; live price via REST fallback
+  * authenticated dashboard + wallet panel render (session-without-wallet
+    edge case SAFE — Header's wallet-first branch prevents undefined crash)
+  * PaymentDialog opens: gas row + treasury + manual path verified
+  * manual hash flow E2E: malformed hash -> 400 INVALID_BODY; valid-format
+    unknown hash -> 404 TX_NOT_FOUND with real 1.5s RPC round-trip; localized
+    fa error rendered; dialog stays open with form intact (phase fix verified)
+  * mobile 390px: zero horizontal overflow; VLM visual check of dialog:
+    PASS/PASS/PASS (summary+gas row, manual form+alert, layout/RTL)
+  * lint clean, tsc clean (src/), dev.log clean
+- DOCS SUITE (7 new + 2 updated, ~1,340 total doc lines):
+  * NEW docs/SECURITY.md — threat model, SIWE auth, HMAC session, payment
+    trust pipeline (7 steps), gating matrix, rate limits, attacks/defenses,
+    secrets, honest limitations, executive summary
+  * NEW docs/API.md — full endpoint reference (methods, auth levels, rate
+    buckets, request/response shapes, all error codes, Prisma data model)
+  * NEW docs/WALLET-AND-TRANSACTIONS.md — official-docs-based guide: network
+    params, provider setup, popup behavior+errors, SIWE/EIP-1271, ERC-20
+    transfer flow, dialog v3 state machine, server verification, finality,
+    Portal/AbstractScan links, troubleshooting table, compliance checklist
+  * NEW docs/TECH-STACK.md — stack table w/ versions+rationale, blockchain
+    layer details, version constraints (wagmi v2!), alternatives rejected
+  * NEW docs/BACKEND.md — module map, route handler pattern, access/analysis/
+    market/alerts modules, ws-ticker service, env table, operations
+  * NEW docs/FRONTEND.md — component tree, wallet header states, payment
+    dialog state diagram, dashboard, design/RTL/a11y rules, i18n, state mgmt
+  * NEW docs/AUDIT.md — full audit report: compliance findings (10 positive),
+    8 issues+fixes, healthy areas, QA results table, prioritized open risks
+  * UPDATED docs/ARCHITECTURE.md — doc index, wallet-flow refs, STALE v2
+    pricing found & corrected to v3 (10/63/240/2555/5110), dialog v3 summary
+  * UPDATED README.md — docs index table (10 docs), payment guide note,
+    stale API tree fixed (payment/config+history routes no longer exist)
+- Screenshots: qa-manual-path.png, qa-home-desktop.png, qa-home-mobile.png
+
+Stage Summary:
+- Documentation suite complete (user request): architecture, security,
+  methods/API, technologies, backend, frontend, stack, full audit — all in
+  docs/, indexed from README + ARCHITECTURE
+- Wallet connection/popup/transaction flows now match official AGW behavior
+  exactly, with precise error surfacing (POPUP_BLOCKED/TIMEOUT/etc.) and
+  ETH-gas awareness; 8 audit issues fixed and browser-verified end-to-end
+- Key facts pinned: PENGU address+decimals verified on-chain; wagmi pinned to
+  v2 (v3 incompatible with agw-react 1.13); finality model documented
+- Open (documented in AUDIT.md): soft-finality crediting (fine for small
+  amounts), single-instance rate limiter (CF binding path documented),
+  notification delivery + admin panel as next candidates

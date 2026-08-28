@@ -57,6 +57,15 @@ async function inspectTransfer(
   try {
     receipt = await rpc().getTransactionReceipt({ hash: txHash as `0x${string}` });
   } catch {
+    // viem throws TransactionReceiptNotFoundError both for unknown hashes
+    // and for txs that are known but not yet mined. Distinguish them so the
+    // client can show "pending" (202) instead of a misleading "not found".
+    try {
+      const tx = await rpc().getTransaction({ hash: txHash as `0x${string}` });
+      if (tx) return { ok: false, error: "TX_PENDING" };
+    } catch {
+      /* tx unknown on this chain → fall through */
+    }
     return { ok: false, error: "TX_NOT_FOUND" };
   }
 

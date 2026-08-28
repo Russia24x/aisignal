@@ -16,7 +16,7 @@
  *
  * @module components/pengu/PaymentDialog
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { erc20Abi, parseUnits } from "viem";
 import { useI18n } from "@/components/i18n/I18nProvider";
@@ -27,7 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { CheckCircle2, Copy, ExternalLink, Loader2, ShieldCheck, Wallet } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, ExternalLink, Loader2, ShieldCheck, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface PaymentProduct {
@@ -43,6 +43,30 @@ interface Props {
 
 type Phase = "idle" | "sending" | "sent" | "verifying" | "success";
 
+/** Classify a failed wallet send (AGW popup semantics + RPC errors). */
+function classifySendError(err: unknown): string {
+  const raw = String(err?.toString?.() ?? err ?? "");
+  if (raw.includes("UserRejected") || raw.includes("User rejected")) return "rejected";
+  // AGW cross-app-connect: window.open returned null (popup blocker)
+  if (
+    raw.includes("Failed to initialize request") ||
+    (raw.includes("popup") && raw.includes("blocked"))
+  ) {
+    return "popup_blocked";
+  }
+  if (raw.includes("Request timeout") || raw.includes("timed out")) return "timeout";
+  // agw-client 1.7.2+ throws an explicit insufficient-balance error; the
+  // node reports "insufficient funds for gas" when ETH is missing.
+  if (raw.toLowerCase().includes("insufficient")) return "insufficient_balance";
+  return "send_failed";
+}
+
+/** Format a native ETH balance (18 decimals) for compact display. */
+function formatEth(raw: bigint | undefined | null): string {
+  if (raw === null || raw === undefined) return "—";
+  return (Number(raw) / 1e18).toLocaleString("en-US", { maximumFractionDigits: 5 });
+}
+
 export function PaymentDialog({ product, onClose }: Props) {
   const { t } = useI18n();
   const { address } = useAccount();
@@ -51,12 +75,24 @@ export function PaymentDialog({ product, onClose }: Props) {
   const [txHash, setTxHash] = useState("");
   const [manualHash, setManualHash] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // "already paid" path: reveal the manual tx-hash input without sending
+  // from this browser (e.g. the user transferred from the Abstract Portal).
+  const [showManual, setShowManual] = useState(false);
 
   const { data: penguBalance } = useBalance({
     address,
     token: publicConfig.penguToken,
     chainId: publicConfig.chainId,
   });
+
+  // Native ETH balance — plain ERC-20 transfers are NOT gas-sponsored on
+  // Abstract (only the AGW account deployment is), so the user needs a
+  // little ETH for the transfer to succeed. Official FAQ: docs.abs.xyz.
+  const { data: ethBalance } = useBalance({
+    address,
+    chainId: publicConfig.chainId,
+  });
+  const lowGas = ethBalance !== undefined && ethBalance.value <= 0n;
 
   const { writeContractAsync } = useWriteContract();
   const receipt = useWaitForTransactionReceipt({
@@ -87,7 +123,7 @@ export function PaymentDialog({ product, onClose }: Props) {
       setPhase("sent");
     } catch (err) {
       setPhase("idle");
-      setError(String(err).includes("UserRejected") ? "rejected" : "send_failed");
+      setError(classifySendError(err));
     }
   }, [product, writeContractAsync]);
 
@@ -108,16 +144,39 @@ export function PaymentDialog({ product, onClose }: Props) {
           setPhase("success");
           await refresh();
         } else {
-          setPhase("sent");
+          // wallet-sent tx keeps the step-2 UI; a manual-pasted hash that
+          // failed returns to the manual entry state (phase stays "idle")
+          setPhase(txHash && txHash === hash ? "sent" : "idle");
+          setShowManual(!txHash || txHash !== hash);
           setError(data.error ?? "VERIFY_FAILED");
         }
       } catch {
-        setPhase("sent");
+        setPhase(txHash ? "sent" : "idle");
+        setShowManual(!txHash);
         setError("NETWORK");
       }
     },
-    [product, refresh],
+    [product, refresh, txHash],
   );
+
+  /**
+   * Auto-verify once the receipt lands on-chain with status success —
+   * the user should not have to click "Verify" manually when the chain
+   * has already confirmed the transfer. Manual verify stays available
+   * as a fallback (e.g. for hashes pasted from an external wallet).
+   */
+  const autoVerified = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      receipt.data?.status === "success" &&
+      txHash &&
+      phase === "sent" &&
+      autoVerified.current !== txHash
+    ) {
+      autoVerified.current = txHash;
+      void verify(txHash);
+    }
+  }, [receipt.data, txHash, phase, verify]);
 
   const explorerTx = (hash: string) => `${publicConfig.explorerUrl}/tx/${hash}`;
 
@@ -171,6 +230,23 @@ export function PaymentDialog({ product, onClose }: Props) {
                   </button>
                 }
               />
+              <Row
+                label={t("payment.gasLabel")}
+                value={
+                  <span
+                    className={cn("font-mono text-sm", lowGas ? "text-sell" : "text-muted-foreground")}
+                    dir="ltr"
+                    title={t("payment.gasHint")}
+                  >
+                    {formatEth(ethBalance?.value)} ETH
+                  </span>
+                }
+              />
+              {lowGas && (
+                <p className="text-[11px] font-semibold leading-5 text-sell">
+                  ⚠ {t("payment.noGas")}
+                </p>
+              )}
             </div>
 
             {/* step 1: pay */}
@@ -192,6 +268,46 @@ export function PaymentDialog({ product, onClose }: Props) {
                 </>
               )}
             </Button>
+
+            {/* already-paid path: paste a tx hash sent from anywhere */}
+            {phase === "idle" && !showManual && (
+              <button
+                type="button"
+                onClick={() => setShowManual(true)}
+                className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                {t("payment.alreadyPaid")}
+              </button>
+            )}
+            {phase === "idle" && showManual && (
+              <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 p-4">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold">{t("payment.txHashLabel")}</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowManual(false)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <Input
+                  dir="ltr"
+                  value={manualHash}
+                  onChange={(e) => setManualHash(e.target.value.trim())}
+                  placeholder={t("payment.txHashPlaceholder")}
+                  className="font-mono text-xs"
+                />
+                <Button
+                  onClick={() => verify(manualHash)}
+                  disabled={!manualHash}
+                  className="w-full gap-2 font-bold"
+                >
+                  <ShieldCheck className="size-4" />
+                  {t("payment.submitTx")}
+                </Button>
+              </div>
+            )}
 
             {/* step 2: tx hash + verify */}
             {(phase === "sent" || phase === "verifying") && (
@@ -220,12 +336,30 @@ export function PaymentDialog({ product, onClose }: Props) {
                 {receipt.isLoading && (
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Loader2 className="size-3.5 animate-spin" />
-                    {t("payment.waiting")}
+                    {t("payment.waitingConfirmation")}
+                  </div>
+                )}
+                {receipt.data?.status === "success" && phase !== "verifying" && (
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-buy">
+                    <CheckCircle2 className="size-3.5" />
+                    {t("payment.confirmed")}
+                  </div>
+                )}
+                {receipt.data?.status === "reverted" && (
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-sell">
+                    <AlertTriangle className="size-3.5" />
+                    {t("payment.errors.TX_FAILED")}
                   </div>
                 )}
                 <Button
                   onClick={() => verify(txHash || manualHash)}
-                  disabled={!(txHash || manualHash) || phase === "verifying"}
+                  disabled={
+                    !(txHash || manualHash) ||
+                    phase === "verifying" ||
+                    // wallet-sent tx: wait for the receipt (auto-verify will
+                    // fire); manually pasted hashes can be verified right away
+                    (!!txHash && !manualHash && receipt.isLoading)
+                  }
                   className="w-full gap-2 font-bold"
                 >
                   {phase === "verifying" ? (
@@ -251,7 +385,11 @@ export function PaymentDialog({ product, onClose }: Props) {
                     ? t("wallet.signFailed")
                     : error === "NETWORK"
                       ? t("common.error")
-                      : t(`payment.errors.${error}` as never, { defaultValue: error })}
+                      : error === "popup_blocked"
+                        ? t("wallet.error.POPUP_BLOCKED")
+                        : error === "timeout"
+                          ? t("wallet.error.TIMEOUT")
+                          : t(`payment.errors.${error}` as never, { defaultValue: error })}
                 </AlertDescription>
               </Alert>
             )}

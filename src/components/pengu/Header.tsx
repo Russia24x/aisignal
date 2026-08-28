@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Copy, ExternalLink, Globe, Loader2, LogOut, Snowflake, Wallet } from "lucide-react";
+import { ChevronDown, Copy, ExternalLink, Globe, Loader2, LogOut, Snowflake, TriangleAlert, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { publicConfig } from "@/lib/public-config";
 import { AbstractProfile } from "@/components/abstract/AbstractProfile";
@@ -24,9 +24,14 @@ import { cn } from "@/lib/utils";
 
 export function Header() {
   const { t, locale, setLocale } = useI18n();
-  const { address, entitlements, signingIn, login, signIn, signOut, walletStatus } = useAuth();
+  const { address, entitlements, signingIn, login, signIn, signOut, walletStatus, chainId } = useAuth();
   const { data } = useMarket();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // AGW is Abstract-only by design, but wagmi still reports the connected
+  // chain — surface a warning if it ever drifts from the configured chain
+  // (e.g. misconfigured env or a non-AGW connector).
+  const wrongNetwork = walletStatus === "connected" && chainId !== undefined && chainId !== publicConfig.chainId;
 
   /** Sign in and surface a localized toast when it fails. */
   const handleSignIn = async () => {
@@ -75,6 +80,17 @@ export function Header() {
         )}
 
         <div className="flex-1" />
+
+        {/* Wrong-network warning (AGW should always be on Abstract) */}
+        {wrongNetwork && (
+          <span
+            className="hidden items-center gap-1.5 rounded-full border border-destructive/40 bg-destructive/10 px-2.5 py-1 text-[11px] font-bold text-destructive sm:inline-flex"
+            title={t("wallet.wrongNetwork")}
+          >
+            <TriangleAlert className="size-3.5" />
+            <span className="font-mono" dir="ltr">#{chainId}</span>
+          </span>
+        )}
 
         {/* Language */}
         <DropdownMenu>

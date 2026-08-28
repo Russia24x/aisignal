@@ -88,11 +88,19 @@
       "TX_ALREADY_USED": "This transaction was already used.",
       "NO_QUALIFYING_TRANSFER": "No sufficient PENGU transfer to the treasury found in this transaction.",
       "INVALID_TX_HASH": "Invalid transaction hash.",
-      "UNAUTHORIZED": "Please sign in first."
+      "UNAUTHORIZED": "Please sign in first.",
+      "insufficient_balance": "Wallet balance is insufficient for this payment",
+      "send_failed": "Sending the transaction failed — try again"
     },
     "balance": "PENGU balance",
     "insufficient": "Insufficient balance",
-    "payFromConnected": "Payment must be sent from the connected wallet ({address})."
+    "payFromConnected": "Payment must be sent from the connected wallet ({address}).",
+    "gasLabel": "Network gas (ETH)",
+    "gasHint": "Token transfers on Abstract need a little ETH for gas (not sponsored)",
+    "noGas": "Your ETH balance is zero — top up a little ETH from the Abstract Portal first, otherwise the transaction will fail",
+    "confirmed": "Confirmed on-chain — verifying automatically…",
+    "waitingConfirmation": "Waiting for Abstract network confirmation…",
+    "alreadyPaid": "Already paid? Enter the transaction hash"
   },
   "products": {
     "choose": "Choose plan",
@@ -195,7 +203,9 @@
       "RATE_LIMITED": "Too many attempts — wait a moment and try again",
       "SIGNATURE_REJECTED": "Signature request rejected",
       "SIGNATURE_FAILED": "Signature verification failed — try again",
-      "NETWORK": "Network error — try again"
+      "NETWORK": "Network error — try again",
+      "POPUP_BLOCKED": "Wallet popup was blocked — allow popups for this site and try again",
+      "TIMEOUT": "Request timed out — please try again"
     }
   },
   "common": {
