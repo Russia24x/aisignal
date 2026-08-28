@@ -636,3 +636,63 @@ Stage Summary:
 - Open (documented in AUDIT.md): soft-finality crediting (fine for small
   amounts), single-instance rate limiter (CF binding path documented),
   notification delivery + admin panel as next candidates
+
+---
+Task ID: 14
+Agent: main
+Task: Remove 15-min auto-dev cron (user request) + full QA round + signal history pagination + price alert notifications/polish
+
+Work Log:
+- USER REQUEST FIRST: deleted the "PenguSignals Web Dev Review (15min)" cron job
+  (job_id 342025) — verified list is now empty
+- SESSION-START-SYNC-CHECK: fetched origin, tree clean, in sync with origin/main
+- SERVICES: dev server 200, ws-ticker 200; mid-session dev server was OOM-killed
+  by the sandbox (dmesg: next-server anon-rss ~2GB during Turbopack compile);
+  closed agent-browser to free RAM, restarted with (setsid nohup … &) subshell
+  pattern — now survives across Bash commands
+- QA (agent-browser through gateway :81):
+  * LiveTicker WebSocket: handshake 200 with sid via /?XTransformPort=3033
+    (earlier 404s were stale logs from direct :3000 access — gateway path works)
+  * Language switch FA↔EN (rtl/ltr), chart tabs 90d/48h, FAQ accordion — all pass
+  * Connect Wallet → navigates to official portal.abs.xyz login with correct
+    params (requester_public_key, provider_app_id, requester_origin) — no errors
+  * Access control chain re-verified with forged HMAC sessions: treasury user
+    (no pass) → signal locked ✓; pass-holder 0x5138fb (LEGACY_PLATFORM grant)
+    → full signal unlocked (BUY, entry zone, stop loss, R/R) ✓
+    (NOTE: forging needs the CORRECT user id from DB, not just address)
+  * Mobile 390px: zero horizontal overflow; VLM desktop 9/10, mobile 8/10
+- FEATURE 1 — signal history pagination:
+  * signal-service.getSignalHistory(limit, offset): paginated rows + stats over
+    ENTIRE history (stable while paging) + total count; 3 parallel queries
+  * API /api/signal/history: offset param (clamped ≥0)
+  * TrackRecord: Load more button (PAGE_SIZE 30), "showing X of Y" counter,
+    day-dedupe merge on load, max-h grows when paginated, footer bg-card/30
+  * Verified with 35 seeded test signals: pages 30→35, footer text correct,
+    button disappears at end; API offset math verified via curl (3 pages)
+- FEATURE 2 — price alerts upgrade:
+  * Proximity progress bar per active alert (|distance|/±20% band → 0-100%,
+    aria progressbar role, 3 color tiers, glow) — VLM visibility 9/10 after
+    track/ring/glow tuning (first version was too faint, VLM flagged it)
+  * Triggered alerts → separate collapsible group (sorted by triggeredAt desc,
+    compact rows, count badge, chevron rotate animation)
+  * In-page notification: 30s refetchInterval + prev-snapshot diff → sonner
+    toast (localized, dir arrow + target) + Web Audio two-tone chime (A5+D6,
+    no asset, autoplay-blocked safe); notified-set prevents re-notify
+  * Live-verified: manually marked alert triggered in DB → toast fired exactly
+    at 30s poll with correct FA text; list moved to triggered group
+- STYLE POLISH (VLM findings): pricing strikethrough lighter (xs/medium/80%),
+  FAQ trigger py-4 + text-start + chevron centering, footer disclaimer
+  text-foreground/70 + text-pretty, PriceChart pb tuning for mobile breathing
+- CLEANUP: all test signals + alerts deleted from dev DB (1 real signal
+  remains), seed script removed; final lint clean, tsc clean, zero page errors
+- Final VLM full-page desktop: 8/10, no critical defects
+
+Stage Summary:
+- User's cron removal request done first and verified
+- Zero real bugs found in QA; two P1 features shipped (history pagination,
+  alert notifications) + proximity UX + micro-polish layer
+- Pagination math + access control + notification timing all browser-verified
+- Known sandbox quirk documented: dev server can be OOM-killed during compile
+  bursts; (setsid nohup … &) restart pattern + closing Chrome recovers it
+- Next candidates: admin panel (owner view of users/payments), Telegram/email
+  alert delivery, KV rate limiting for Cloudflare deploy

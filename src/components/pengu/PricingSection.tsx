@@ -130,7 +130,7 @@ export function PricingSection() {
                 <div className="mt-4 flex flex-col gap-0.5" dir="ltr">
                   <div className="flex flex-wrap items-baseline gap-1.5">
                     {hasDiscount && (
-                      <span className="font-mono text-sm font-bold text-muted-foreground line-through decoration-sell/70">
+                      <span className="self-center font-mono text-xs font-medium text-muted-foreground/80 line-through decoration-sell/60">
                         {pass.basePricePengu.toLocaleString("en-US")}
                       </span>
                     )}

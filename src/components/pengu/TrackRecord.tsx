@@ -5,16 +5,22 @@
  * Built from the Signal table (auto-evaluated T+24h). No demo data:
  * starts empty and fills as days pass.
  *
+ * Pagination: fetches pages of 30 with a "Load more" button; stats and
+ * the shown/total counter always reflect the ENTIRE history.
+ *
  * @module components/pengu/TrackRecord
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { fmt } from "./useMarket";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Trophy } from "lucide-react";
+import { History, Loader2, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+const PAGE_SIZE = 30;
 
 interface Item {
   day: string;
@@ -39,18 +45,49 @@ export function TrackRecord() {
   const { t } = useI18n();
   const [items, setItems] = useState<Item[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    fetch("/api/signal/history?limit=30", { cache: "no-store" })
+    fetch(`/api/signal/history?limit=${PAGE_SIZE}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         if (d.ok) {
           setItems(d.items);
           setStats(d.stats);
-        }
+          setTotal(d.total ?? d.items.length);
+        } else setError(true);
       })
-      .catch(() => setItems([]));
+      .catch(() => {
+        setItems([]);
+        setError(true);
+      });
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (!items || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const r = await fetch(`/api/signal/history?limit=${PAGE_SIZE}&offset=${items.length}`, {
+        cache: "no-store",
+      });
+      const d = await r.json();
+      if (d.ok) {
+        // merge, dedupe by day (safety against races)
+        const seen = new Set(items.map((i) => i.day));
+        setItems([...items, ...(d.items as Item[]).filter((i) => !seen.has(i.day))]);
+        setStats(d.stats);
+        setTotal(d.total ?? 0);
+      }
+    } catch {
+      /* keep current list; next click retries */
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [items, loadingMore]);
+
+  const hasMore = items !== null && items.length < total;
 
   return (
     <section id="track" className="scroll-mt-20 px-4 py-16">
@@ -87,53 +124,81 @@ export function TrackRecord() {
                 <Trophy className="size-6" />
               </div>
               <p className="text-sm font-bold">🐧 {t("track.empty")}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("track.subtitle")}
-              </p>
+              <p className="mt-1 text-xs text-muted-foreground">{t("track.subtitle")}</p>
             </div>
           ) : (
-            <div className="max-h-96 overflow-y-auto nice-scroll">
-              <Table>
-                <TableHeader className="sticky top-0 bg-popover/95 backdrop-blur">
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-xs">{t("track.day")}</TableHead>
-                    <TableHead className="text-xs">{t("track.action")}</TableHead>
-                    <TableHead className="text-xs">{t("signal.confidence")}</TableHead>
-                    <TableHead className="text-xs">{t("track.priceAtSignal")}</TableHead>
-                    <TableHead className="text-xs">{t("track.change")}</TableHead>
-                    <TableHead className="text-xs">{t("track.outcome")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.map((it) => (
-                    <TableRow key={it.day} className="text-xs">
-                      <TableCell className="font-mono font-semibold">{it.day}</TableCell>
-                      <TableCell>
-                        <ActionBadge action={it.action} />
-                      </TableCell>
-                      <TableCell className="font-mono">{it.confidence}%</TableCell>
-                      <TableCell className="font-mono" dir="ltr">
-                        {fmt.price(it.priceAtSignal)}
-                      </TableCell>
-                      <TableCell
-                        dir="ltr"
-                        className={cn(
-                          "font-mono font-bold",
-                          (it.priceChangePct ?? 0) >= 0 ? "text-buy" : "text-sell",
-                        )}
-                      >
-                        {it.priceChangePct !== null ? fmt.pct(it.priceChangePct) : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <OutcomeBadge outcome={it.outcome} />
-                      </TableCell>
+            <>
+              <div className={cn("nice-scroll", hasMore ? "max-h-[28rem]" : "max-h-96", "overflow-y-auto")}>
+                <Table>
+                  <TableHeader className="sticky top-0 bg-popover/95 backdrop-blur">
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-xs">{t("track.day")}</TableHead>
+                      <TableHead className="text-xs">{t("track.action")}</TableHead>
+                      <TableHead className="text-xs">{t("signal.confidence")}</TableHead>
+                      <TableHead className="text-xs">{t("track.priceAtSignal")}</TableHead>
+                      <TableHead className="text-xs">{t("track.change")}</TableHead>
+                      <TableHead className="text-xs">{t("track.outcome")}</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((it) => (
+                      <TableRow key={it.day} className="text-xs">
+                        <TableCell className="font-mono font-semibold">{it.day}</TableCell>
+                        <TableCell>
+                          <ActionBadge action={it.action} />
+                        </TableCell>
+                        <TableCell className="font-mono">{it.confidence}%</TableCell>
+                        <TableCell className="font-mono" dir="ltr">
+                          {fmt.price(it.priceAtSignal)}
+                        </TableCell>
+                        <TableCell
+                          dir="ltr"
+                          className={cn(
+                            "font-mono font-bold",
+                            (it.priceChangePct ?? 0) >= 0 ? "text-buy" : "text-sell",
+                          )}
+                        >
+                          {it.priceChangePct !== null ? fmt.pct(it.priceChangePct) : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <OutcomeBadge outcome={it.outcome} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* pagination footer */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 bg-card/30 px-4 py-3">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                  <History className="size-3.5" />
+                  {t("track.showing", { shown: String(items.length), total: String(total) })}
+                </span>
+                {hasMore && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="gap-1.5 px-4 font-bold"
+                  >
+                    {loadingMore ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <History className="size-3.5" />
+                    )}
+                    {loadingMore ? t("track.loadingMore") : t("track.loadMore")}
+                  </Button>
+                )}
+              </div>
+            </>
           )}
         </div>
+
+        {error && items !== null && items.length === 0 && (
+          <p className="mt-3 text-center text-xs text-muted-foreground">{t("common.error")}</p>
+        )}
       </div>
     </section>
   );

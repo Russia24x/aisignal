@@ -120,17 +120,25 @@ export async function evaluateOpenSignals(): Promise<number> {
 
 /** Public track record (no auth) — proves the engine's real performance.
  *  NEVER includes today's signal: the current day's action is the paid
- *  product and must not leak through the free track record. */
-export async function getSignalHistory(limit = 30): Promise<{ items: SignalHistoryItem[]; stats: Record<string, number> }> {
+ *  product and must not leak through the free track record.
+ *  Paginated: `offset` skips rows ("load more"); `stats`/`total` always
+ *  cover the ENTIRE history, not just the current page. */
+export async function getSignalHistory(
+  limit = 30,
+  offset = 0,
+): Promise<{ items: SignalHistoryItem[]; stats: Record<string, number>; total: number }> {
   await evaluateOpenSignals();
   const today = new Date().toISOString().slice(0, 10);
-  const rows = await db.signal.findMany({
-    where: { day: { lt: today } },
-    orderBy: { day: "desc" },
-    take: limit,
-  });
+  const where = { day: { lt: today } };
+  const [rows, statRows, total] = await Promise.all([
+    db.signal.findMany({ where, orderBy: { day: "desc" }, take: limit, skip: offset }),
+    db.signal.findMany({ where, select: { action: true, confidence: true, price: true, outcome: true, outcomePrice: true } }),
+    db.signal.count({ where }),
+  ]);
+  const toChange = (s: { outcomePrice: number | null; price: number }) =>
+    s.outcomePrice !== null && s.price > 0 ? ((s.outcomePrice - s.price) / s.price) * 100 : null;
   const items: SignalHistoryItem[] = rows.map((s) => {
-    const change = s.outcomePrice !== null && s.price > 0 ? ((s.outcomePrice - s.price) / s.price) * 100 : null;
+    const change = toChange(s);
     let correct: boolean | null = null;
     if (change !== null) {
       if (s.action === "BUY") correct = change > 0;
@@ -151,15 +159,19 @@ export async function getSignalHistory(limit = 30): Promise<{ items: SignalHisto
     };
   });
 
-  const closed = items.filter((i) => i.outcome === "WIN" || i.outcome === "LOSS");
+  // stats over ALL history (stable while paging)
+  const closed = statRows.filter((i) => i.outcome === "WIN" || i.outcome === "LOSS");
   const wins = closed.filter((i) => i.outcome === "WIN").length;
   const stats = {
-    total: items.length,
+    total: statRows.length,
     closed: closed.length,
     wins,
     losses: closed.length - wins,
     winRate: closed.length > 0 ? Math.round((wins / closed.length) * 100) : 0,
-    avgConfidence: items.length > 0 ? Math.round((items.reduce((a, i) => a + i.confidence, 0) / items.length) * 10) / 10 : 0,
+    avgConfidence:
+      statRows.length > 0
+        ? Math.round((statRows.reduce((a, i) => a + i.confidence, 0) / statRows.length) * 10) / 10
+        : 0,
   };
-  return { items, stats };
+  return { items, stats, total };
 }

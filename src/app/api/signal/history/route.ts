@@ -12,7 +12,9 @@ export async function GET(req: NextRequest) {
 
   const limitParam = Number(req.nextUrl.searchParams.get("limit") ?? "30");
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 90) : 30;
+  const offsetParam = Number(req.nextUrl.searchParams.get("offset") ?? "0");
+  const offset = Number.isFinite(offsetParam) ? Math.max(Math.trunc(offsetParam), 0) : 0;
 
-  const { items, stats } = await getSignalHistory(limit);
-  return NextResponse.json({ ok: true, items, stats });
+  const { items, stats, total } = await getSignalHistory(limit, offset);
+  return NextResponse.json({ ok: true, items, stats, total });
 }

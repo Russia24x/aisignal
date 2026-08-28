@@ -8,14 +8,18 @@
  * UI:
  *  - create form: direction (ABOVE/BELOW) + target price (USD)
  *    + quick-set chips (+5% / -5% / +10% / -10% relative to live price)
- *  - live alerts list: active + recently-triggered, delete buttons
- *  - state shows live PENGU price as reference
+ *  - live alerts list with proximity progress bar (how close the live
+ *    price is to each target)
+ *  - triggered alerts grouped into a separate collapsible section
+ *  - in-page notification: when an alert fires while the page is open
+ *    (30s polling), a toast + soft chime announces it
  *
  * @module components/pengu/PriceAlerts
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, Loader2, Plus, Trash2, TrendingDown, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
+import { Bell, BellOff, BellRing, ChevronDown, History, Loader2, Plus, Trash2, TrendingDown, TrendingUp } from "lucide-react";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
 import { useMarket, fmt } from "./useMarket";
@@ -56,12 +60,50 @@ export function PriceAlerts() {
     },
     enabled: !!entitlements?.authenticated,
     staleTime: 30_000,
+    refetchInterval: 30_000,
     retry: 1,
   });
 
   const alerts = alertsQuery.data ?? [];
-  const activeCount = alerts.filter((a) => a.active).length;
-  const triggeredCount = alerts.length - activeCount;
+  const activeAlerts = useMemo(() => alerts.filter((a) => a.active), [alerts]);
+  const triggeredAlerts = useMemo(
+    () =>
+      alerts
+        .filter((a) => !a.active)
+        .sort((a, b) => (b.triggeredAt ?? "").localeCompare(a.triggeredAt ?? "")),
+    [alerts],
+  );
+  const activeCount = activeAlerts.length;
+  const triggeredCount = triggeredAlerts.length;
+
+  // ── in-page trigger notification ─────────────────────────────────────────
+  // Compare each poll result against the previous snapshot; newly-triggered
+  // alerts (active -> triggered) fire a toast + soft chime.
+  const prevAlertsRef = useRef<Map<string, boolean> | null>(null);
+  const [showTriggered, setShowTriggered] = useState(true);
+  const notifiedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const map = new Map(alerts.map((a) => [a.id, a.active]));
+    const prev = prevAlertsRef.current;
+    prevAlertsRef.current = map;
+    if (!prev) return; // first load: baseline, no notifications
+    for (const a of alerts) {
+      if (map.get(a.id) === false && prev.get(a.id) === true && !notifiedRef.current.has(a.id)) {
+        notifiedRef.current.add(a.id);
+        const dir = a.direction === "ABOVE" ? "↑" : "↓";
+        toast.success(t("alerts.firedToast", { dir, target: `$${a.target.toFixed(5)}` }), {
+          description: t("alerts.firedToastDesc"),
+          icon: <BellRing className="size-4" />,
+          duration: 8000,
+        });
+        try {
+          playChime();
+        } catch {
+          /* audio autoplay may be blocked — toast alone is fine */
+        }
+      }
+    }
+  }, [alertsQuery.data, t]);
 
   const createMut = useMutation({
     mutationFn: async (input: { direction: "ABOVE" | "BELOW"; target: number }) => {
@@ -305,19 +347,63 @@ export function PriceAlerts() {
             <p className="text-sm font-bold">🔔 {t("alerts.noAlerts")}</p>
           </div>
         ) : (
-          <div className="space-y-2.5">
-            {alerts.map((a) => (
-              <AlertRow
-                key={a.id}
-                alert={a}
-                livePrice={livePrice}
-                onDelete={() => deleteMut.mutate(a.id)}
-                deleting={deleteMut.isPending && deleteMut.variables === a.id}
-                localeStr={localeStr}
-                t={t}
-              />
-            ))}
-          </div>
+          <>
+            {/* active alerts */}
+            {activeCount > 0 && (
+              <div className="space-y-2.5">
+                {activeAlerts.map((a) => (
+                  <AlertRow
+                    key={a.id}
+                    alert={a}
+                    livePrice={livePrice}
+                    onDelete={() => deleteMut.mutate(a.id)}
+                    deleting={deleteMut.isPending && deleteMut.variables === a.id}
+                    localeStr={localeStr}
+                    t={t}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* triggered alerts — collapsible group */}
+            {triggeredCount > 0 && (
+              <div className="glass-card mt-4 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowTriggered((v) => !v)}
+                  aria-expanded={showTriggered}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-start transition-colors hover:bg-muted/30"
+                >
+                  <span className="inline-flex items-center gap-2 text-xs font-bold text-muted-foreground">
+                    <History className="size-4" />
+                    {t("alerts.triggeredHistory")}
+                    <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px] font-black">
+                      {triggeredCount}
+                    </Badge>
+                  </span>
+                  <ChevronDown
+                    className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-200", showTriggered && "rotate-180")}
+                  />
+                </button>
+                {showTriggered && (
+                  <div className="space-y-2.5 border-t border-border/50 p-3">
+                    {triggeredAlerts.map((a) => (
+                      <AlertRow
+                        key={a.id}
+                        alert={a}
+                        livePrice={livePrice}
+                        onDelete={() => deleteMut.mutate(a.id)}
+                        deleting={deleteMut.isPending && deleteMut.variables === a.id}
+                        localeStr={localeStr}
+                        t={t}
+                        compact
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     </section>
@@ -331,6 +417,7 @@ function AlertRow({
   deleting,
   localeStr,
   t,
+  compact,
 }: {
   alert: AlertItem;
   livePrice?: number;
@@ -338,6 +425,7 @@ function AlertRow({
   deleting: boolean;
   localeStr: string;
   t: (k: string, params?: Record<string, string | number>) => string;
+  compact?: boolean;
 }) {
   const isAbove = alert.direction === "ABOVE";
   const Icon = isAbove ? TrendingUp : TrendingDown;
@@ -349,32 +437,41 @@ function AlertRow({
       ? ((alert.target - livePrice) / livePrice) * 100
       : null;
 
+  // proximity: 0% = far away, 100% = at target (active alerts only).
+  // Normalized over a ±20% band around the live price.
+  const proximity =
+    alert.active && distPct !== null
+      ? Math.max(0, Math.min(100, Math.round(100 - (Math.abs(distPct) / 20) * 100)))
+      : null;
+
   return (
     <TooltipProvider delayDuration={150}>
       <div
         className={cn(
-          "glass-card flex items-center gap-3 px-4 py-3",
+          "glass-card flex items-center gap-3",
+          compact ? "px-3 py-2.5" : "px-4 py-3",
           !alert.active && "opacity-70",
         )}
       >
         <span
           className={cn(
-            "grid size-9 shrink-0 place-items-center rounded-xl ring-1",
+            "grid shrink-0 place-items-center rounded-xl ring-1",
+            compact ? "size-8" : "size-9",
             alert.active
               ? "bg-primary/15 ring-primary/30"
               : "bg-muted ring-border",
             alert.active ? iconColor : "text-muted-foreground",
           )}
         >
-          <Icon className="size-5" />
+          <Icon className={compact ? "size-4" : "size-5"} />
         </span>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="truncate text-sm font-bold">
               {isAbove ? t("alerts.above") : t("alerts.below")}
             </span>
-            <span className="font-mono text-base font-black" dir="ltr">
+            <span className={cn("font-mono font-black", compact ? "text-sm" : "text-base")} dir="ltr">
               ${alert.target.toFixed(5)}
             </span>
             {alert.active ? (
@@ -387,7 +484,7 @@ function AlertRow({
               </Badge>
             )}
           </div>
-          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
             {alert.active && distPct !== null ? (
               <span dir="ltr">
                 {distPct >= 0 ? "+" : ""}
@@ -414,6 +511,31 @@ function AlertRow({
               })}
             </span>
           </div>
+
+          {/* proximity progress bar (active alerts with live price) */}
+          {proximity !== null && (
+            <div className="mt-2 flex items-center gap-2" dir="ltr">
+              <div
+                className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted-foreground/25 ring-1 ring-inset ring-border/60"
+                role="progressbar"
+                aria-label={t("alerts.proximity")}
+                aria-valuenow={proximity}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className={cn(
+                    "h-full rounded-full shadow-[0_0_8px_currentColor] transition-all duration-700",
+                    proximity >= 80 ? "bg-buy text-buy" : proximity >= 40 ? "bg-primary text-primary" : "bg-primary/60 text-primary",
+                  )}
+                  style={{ width: `${Math.max(proximity, 4)}%` }}
+                />
+              </div>
+              <span className="shrink-0 font-mono text-[10px] font-bold text-muted-foreground">
+                {t("alerts.proximity")} {proximity}%
+              </span>
+            </div>
+          )}
         </div>
 
         <Tooltip>
@@ -423,7 +545,7 @@ function AlertRow({
               size="icon"
               onClick={onDelete}
               disabled={deleting}
-              className="size-9 text-muted-foreground hover:text-destructive"
+              className={cn("text-muted-foreground hover:text-destructive", compact ? "size-8" : "size-9")}
             >
               {deleting ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -439,4 +561,30 @@ function AlertRow({
       </div>
     </TooltipProvider>
   );
+}
+
+/** Soft two-tone chime for alert notifications (Web Audio, no asset). */
+function playChime() {
+  if (typeof window === "undefined") return;
+  const AudioCtx =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return;
+  const ctx = new AudioCtx();
+  const now = ctx.currentTime;
+  const tone = (freq: number, start: number, dur: number) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, now + start);
+    gain.gain.linearRampToValueAtTime(0.12, now + start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + start);
+    osc.stop(now + start + dur + 0.05);
+  };
+  tone(880, 0, 0.25); // A5
+  tone(1174.66, 0.12, 0.35); // D6
+  setTimeout(() => void ctx.close().catch(() => {}), 1200);
 }

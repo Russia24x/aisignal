@@ -38,7 +38,7 @@ export function PriceChart() {
   return (
     <section id="chart" className="scroll-mt-20 px-4 py-8">
       <div className="mx-auto max-w-6xl">
-        <div className="glass-card p-5 sm:p-6">
+        <div className="glass-card p-5 pb-3 sm:p-6 sm:pb-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-black">PENGU / USD</h2>

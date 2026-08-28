@@ -157,7 +157,10 @@
     "winRate": "Win rate",
     "closedSignals": "Evaluated signals",
     "avgConfidence": "Avg confidence",
-    "empty": "No signals recorded yet — today's signal will be the first."
+    "empty": "No signals recorded yet — today's signal will be the first.",
+    "showing": "Showing {shown} of {total} signals",
+    "loadMore": "Load more",
+    "loadingMore": "Loading…"
   },
   "engine": {
     "title": "Inside the Analysis Engine",
@@ -288,6 +291,10 @@
     "ex_above10": "+10% above",
     "ex_below10": "-10% below",
     "activeCount": "{n} of 10 active",
-    "connectFirst": "Connect your wallet to set price alerts"
+    "connectFirst": "Connect your wallet to set price alerts",
+    "firedToast": "Alert fired! PENGU crossed {dir} {target}",
+    "firedToastDesc": "The live price reached your target. Check your alert for details.",
+    "triggeredHistory": "Triggered history",
+    "proximity": "Proximity"
   }
 }

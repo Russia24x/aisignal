@@ -35,8 +35,10 @@ export function FaqSection() {
         <Accordion type="single" collapsible className="glass-card px-5 py-2">
           {faqs.map((f, i) => (
             <AccordionItem key={i} value={`q${i}`} className="border-border/50">
-              <AccordionTrigger className="text-sm font-bold hover:no-underline">{f.q}</AccordionTrigger>
-              <AccordionContent className="text-[13px] leading-7 text-muted-foreground">{f.a}</AccordionContent>
+              <AccordionTrigger className="items-center gap-3 py-4 text-start text-sm font-bold hover:no-underline">
+                <span className="flex-1">{f.q}</span>
+              </AccordionTrigger>
+              <AccordionContent className="pb-4 text-[13px] leading-7 text-muted-foreground">{f.a}</AccordionContent>
             </AccordionItem>
           ))}
         </Accordion>
@@ -56,7 +58,7 @@ export function Footer() {
           </span>
           Pengu<span className="text-primary">Signals</span>
         </div>
-        <p className="max-w-2xl text-xs leading-6 text-muted-foreground">{t("footer.disclaimer")}</p>
+        <p className="max-w-2xl text-pretty text-xs leading-6 text-foreground/70">{t("footer.disclaimer")}</p>
         <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[11px] text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <ShieldCheck className="size-3.5 text-primary" />
