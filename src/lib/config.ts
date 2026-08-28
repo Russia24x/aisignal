@@ -67,6 +67,11 @@ const serverSchema = z.object({
   // Session
   SESSION_TTL_HOURS: z.coerce.number().default(168),
 
+  // Owner/admin wallet addresses (comma-separated, lowercase). Only these
+  // wallets see the admin panel and pass the /api/admin/* gates. Empty =
+  // admin features disabled entirely (safest default).
+  ADMIN_ADDRESSES: z.string().default(""),
+
   // i18n
   NEXT_PUBLIC_DEFAULT_LOCALE: z.string().default("fa"),
   NEXT_PUBLIC_SUPPORTED_LOCALES: z.string().default("fa,en"),
@@ -114,4 +119,10 @@ export const serverConfig = {
     signal: parseRate(env.RATE_LIMIT_SIGNAL),
     public: parseRate(env.RATE_LIMIT_PUBLIC),
   },
+  /** Lowercased admin address set (O(1) membership checks). */
+  adminAddresses: new Set(
+    env.ADMIN_ADDRESSES.split(",")
+      .map((a) => a.trim().toLowerCase())
+      .filter((a) => /^0x[a-f0-9]{40}$/.test(a)),
+  ),
 } as const;

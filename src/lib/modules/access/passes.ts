@@ -111,4 +111,6 @@ export interface EntitlementsDTO {
   signalAccess: boolean;
   activeGrant: ActiveGrantDTO | null;
   subscriptionDaysLeft: number;
+  /** true when this wallet is a configured owner (ADMIN_ADDRESSES). */
+  admin: boolean;
 }

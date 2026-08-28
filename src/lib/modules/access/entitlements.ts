@@ -19,6 +19,7 @@ import {
   LIFETIME_GRANT_DAYS,
   type EntitlementsDTO,
 } from "./passes";
+import { isAdminAddress } from "@/lib/security/admin";
 
 export type Entitlements = EntitlementsDTO;
 
@@ -30,6 +31,7 @@ function anonymous(): Entitlements {
     signalAccess: false,
     activeGrant: null,
     subscriptionDaysLeft: 0,
+    admin: false,
   };
 }
 
@@ -66,6 +68,7 @@ export async function getEntitlements(userId: string | null): Promise<Entitlemen
         }
       : null,
     subscriptionDaysLeft: daysLeft,
+    admin: isAdminAddress(user.address),
   };
 }
 
