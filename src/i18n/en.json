@@ -1,0 +1,192 @@
+{
+  "brand": {
+    "name": "PenguSignals",
+    "tagline": "Smart PENGU signals on Abstract Chain"
+  },
+  "nav": {
+    "market": "Market",
+    "signal": "Today's Signal",
+    "engine": "Engine",
+    "trackRecord": "Track Record",
+    "faq": "FAQ",
+    "connect": "Connect Wallet",
+    "disconnect": "Disconnect",
+    "dashboard": "Dashboard"
+  },
+  "hero": {
+    "badge": "Built on Abstract blockchain",
+    "title1": "Buy & Sell Signals for",
+    "title2": "PENGU",
+    "subtitle": "A multi-layer technical analysis engine — RSI, MACD, Bollinger, volume flow and 7 more indicators — runs on real market data every day and tells you: buy, sell, or wait.",
+    "ctaPrimary": "Get today's signal",
+    "ctaSecondary": "Explore the engine",
+    "statPrice": "Live price",
+    "statChange24h": "24h change",
+    "statVolume": "24h volume",
+    "statLiquidity": "Pool liquidity",
+    "statMcap": "Market cap",
+    "liveOn": "Live on",
+    "updated": "Updated"
+  },
+  "signal": {
+    "title": "Today's Signal",
+    "day": "Day",
+    "action": "Signal",
+    "BUY": "BUY",
+    "SELL": "SELL",
+    "HOLD": "HOLD / WAIT",
+    "confidence": "Confidence",
+    "compositeScore": "Composite score",
+    "entryZone": "Entry zone",
+    "stopLoss": "Stop loss",
+    "takeProfit1": "Take profit 1",
+    "takeProfit2": "Take profit 2",
+    "riskReward": "Risk / reward",
+    "expectedRange": "Expected range today",
+    "support": "Nearest support",
+    "resistance": "Nearest resistance",
+    "reasoning": "Analysis & reasoning",
+    "factors": "Indicator breakdown",
+    "factor": "Factor",
+    "score": "Score",
+    "weight": "Weight",
+    "bullish": "bullish",
+    "bearish": "bearish",
+    "neutral": "neutral",
+    "generatedAt": "Generated at",
+    "candlesUsed": "candles analyzed",
+    "connectFirst": "Connect your Abstract wallet to view the signal",
+    "needPlatform": "Platform access required",
+    "needPlatformDesc": "Pay the one-time 5 PENGU tariff to enter the signal dashboard.",
+    "needDayPass": "Today's signal is locked",
+    "needDayPassDesc": "Pay 1 PENGU to unlock today's signal, or activate a daily subscription.",
+    "consensus": "Indicator consensus",
+    "previewNote": "Free preview — full signal after payment",
+    "locked": "Locked",
+    "unlock": "Unlock",
+    "subscribed": "Active subscription",
+    "expires": "Expires",
+    "daysLeft": "days left"
+  },
+  "payment": {
+    "title": "Pay with PENGU",
+    "sendTo": "Destination (treasury)",
+    "amount": "Amount",
+    "product": "Product",
+    "payNow": "Pay from wallet",
+    "waiting": "Waiting for transaction…",
+    "submitTx": "Confirm payment",
+    "txHashLabel": "Transaction hash",
+    "txHashPlaceholder": "0x… paste the tx hash after wallet confirmation",
+    "verify": "Verify & activate",
+    "verifying": "Verifying on-chain…",
+    "success": "Payment verified successfully!",
+    "viewOnExplorer": "View on Abscan",
+    "errors": {
+      "TX_NOT_FOUND": "Transaction not found on Abstract chain. Try again in a few seconds.",
+      "TX_PENDING": "Transaction not confirmed yet. Try again shortly.",
+      "TX_FAILED": "The transaction failed.",
+      "TX_ALREADY_USED": "This transaction was already used.",
+      "NO_QUALIFYING_TRANSFER": "No sufficient PENGU transfer to the treasury found in this transaction.",
+      "INVALID_TX_HASH": "Invalid transaction hash.",
+      "UNAUTHORIZED": "Please sign in first."
+    },
+    "balance": "PENGU balance",
+    "insufficient": "Insufficient balance",
+    "payFromConnected": "Payment must be sent from the connected wallet ({address})."
+  },
+  "products": {
+    "platform": {
+      "name": "Platform Access",
+      "desc": "One-time — permanent dashboard access",
+      "price": "5 PENGU"
+    },
+    "dayPass": {
+      "name": "Day Pass",
+      "desc": "Unlock today's signal until end of UTC day",
+      "price": "1 PENGU"
+    },
+    "sub7": {
+      "name": "7-Day Subscription",
+      "desc": "1 PENGU per day — no daily payments needed",
+      "price": "7 PENGU"
+    },
+    "sub30": {
+      "name": "30-Day Subscription",
+      "desc": "1 PENGU per day — best value",
+      "price": "30 PENGU"
+    },
+    "choose": "Choose plan"
+  },
+  "track": {
+    "title": "Real Signal Track Record",
+    "subtitle": "Every signal is auto-evaluated against the real price after 24h. No fake data.",
+    "day": "Day",
+    "action": "Signal",
+    "priceAtSignal": "Price at signal",
+    "outcome": "Outcome",
+    "change": "24h change",
+    "WIN": "Correct",
+    "LOSS": "Wrong",
+    "OPEN": "Pending",
+    "EXPIRED": "Expired",
+    "winRate": "Win rate",
+    "closedSignals": "Evaluated signals",
+    "avgConfidence": "Avg confidence",
+    "empty": "No signals recorded yet — today's signal will be the first."
+  },
+  "engine": {
+    "title": "Inside the Analysis Engine",
+    "subtitle": "11 analysis families, scientific weighting, transparent decisions",
+    "indicatorsTitle": "Indicators & methods",
+    "methodology": "Methodology",
+    "methodologyBody": "Each indicator produces a normalized score between -1 and +1; scores combine with explicit weights into a composite between -100 and +100. Above +20 means BUY, below -20 means SELL, in between means WAIT. Entry and stop levels are ATR-based.",
+    "securityTitle": "Security is priority one, two and three",
+    "securityBody": "Wallet-signature auth (SIWE), fully on-chain payment verification via the official Abstract RPC, HMAC-signed sessions, rate limiting, Zod input validation, and zero client trust.",
+    "dataTitle": "Real data, no demos",
+    "dataBody": "Live price from DexScreener, historical data from CoinGecko — both public, no API keys. All computation is server-side and reproducible."
+  },
+  "faq": {
+    "title": "FAQ",
+    "q1": "How do I sign in?",
+    "a1": "Just connect your Abstract wallet (AGW) and sign the login message. No email or password needed.",
+    "q2": "How does payment work?",
+    "a2": "You transfer PENGU from your wallet to the treasury address; the system automatically verifies the transaction on-chain and activates your access.",
+    "q3": "Are these signals financial advice?",
+    "a3": "No. This is the output of technical-analysis algorithms on real data, for informational purposes only. Trade at your own risk.",
+    "q4": "Why Abstract?",
+    "a4": "Abstract is an Ethereum L2 with negligible fees — the official home of the Pudgy Penguins ecosystem and the PENGU token. Where penguins live."
+  },
+  "footer": {
+    "disclaimer": "⚠️ Algorithmic analysis, not financial advice. Trading involves risk.",
+    "security": "Security-first | On-chain payments | Transparent engine",
+    "builtOn": "Built on Abstract",
+    "treasury": "Treasury"
+  },
+  "wallet": {
+    "connected": "Connected",
+    "wrongNetwork": "Wrong network — switch to Abstract",
+    "signInTitle": "Sign in with signature",
+    "signInDesc": "Sign this message with your wallet to create a secure session.",
+    "signing": "Waiting for signature…",
+    "signFailed": "Signature failed",
+    "welcome": "Welcome"
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "close": "Close",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "refresh": "Refresh",
+    "language": "Language"
+  },
+  "chart": {
+    "daily": "Daily",
+    "hourly": "Hourly",
+    "price": "Price (USD)"
+  }
+}

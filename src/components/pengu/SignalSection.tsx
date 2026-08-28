@@ -1,0 +1,496 @@
+"use client";
+
+/**
+ * SignalSection — the product.
+ *
+ * State machine (server-driven via /api/auth/session entitlements):
+ *   not connected      → connect CTA
+ *   not authenticated   → sign-message CTA
+ *   no platform access  → 5 PENGU platform tariff CTA
+ *   no active grant     → 1 PENGU day pass / subscription CTA
+ *   access granted      → full signal card
+ *
+ * The free layer always shows the live consensus teaser so visitors can
+ * verify the engine is real before paying.
+ *
+ * @module components/pengu/SignalSection
+ */
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useI18n } from "@/components/i18n/I18nProvider";
+import { useAuth } from "./useAuth";
+import { useMarket, fmt } from "./useMarket";
+import { PaymentDialog, type PaymentProduct } from "./PaymentDialog";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  Brain,
+  Calendar,
+  Coins,
+  Gauge,
+  Info,
+  Loader2,
+  Lock,
+  PauseCircle,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  Wallet,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface FullSignal {
+  action: "BUY" | "SELL" | "HOLD";
+  score: number;
+  confidence: number;
+  dataQuality: number;
+  price: number;
+  entryLow: number | null;
+  entryHigh: number | null;
+  stopLoss: number | null;
+  takeProfit1: number | null;
+  takeProfit2: number | null;
+  riskReward: number | null;
+  expectedRangeLow: number | null;
+  expectedRangeHigh: number | null;
+  support: number | null;
+  resistance: number | null;
+  atr: number | null;
+  volatility: number | null;
+  factors: { key: string; score: number; weight: number; contribution: number }[];
+  reasoning: { fa: string; en: string };
+  candlesUsed: number;
+}
+
+interface PreviewData {
+  day: string;
+  consensus: { bullish: number; bearish: number; neutral: number; total: number };
+  dataQuality: number;
+  candlesUsed: number;
+}
+
+const FACTOR_LABELS: Record<string, { fa: string; en: string }> = {
+  emaTrend: { fa: "روند EMA (9/21)", en: "EMA trend (9/21)" },
+  smaStructure: { fa: "ساختار SMA (20/50)", en: "SMA structure (20/50)" },
+  rsi: { fa: "RSI (14)", en: "RSI (14)" },
+  macd: { fa: "MACD (12/26/9)", en: "MACD (12/26/9)" },
+  bollinger: { fa: "باندهای بولینگر", en: "Bollinger Bands" },
+  stochastic: { fa: "استوکاستیک (14/3)", en: "Stochastic (14/3)" },
+  obv: { fa: "جریان حجم (OBV)", en: "Volume flow (OBV)" },
+  vwap: { fa: "VWAP", en: "VWAP" },
+  momentum: { fa: "مومنتوم و شیب", en: "Momentum & slope" },
+  volume: { fa: "رژیم حجم", en: "Volume regime" },
+  srLevels: { fa: "حمایت/مقاومت", en: "Support/Resistance" },
+};
+
+export function SignalSection() {
+  const { t, locale } = useI18n();
+  const { walletStatus, entitlements, signingIn, login, signIn, loading: authLoading } = useAuth();
+  const { data: market } = useMarket();
+  const [product, setProduct] = useState<PaymentProduct | null>(null);
+
+  const hasAccess = entitlements?.signalAccess && entitlements?.platformAccess;
+
+  // free preview (public)
+  const previewQuery = useQuery({
+    queryKey: ["signal-preview"],
+    queryFn: async (): Promise<PreviewData | null> => {
+      const r = await fetch("/api/signal/preview", { cache: "no-store" });
+      const d = await r.json();
+      return d.ok ? d : null;
+    },
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const preview = previewQuery.data ?? null;
+
+  // paid signal (entitlement-gated)
+  const signalQuery = useQuery({
+    queryKey: ["signal-today", entitlements?.signalAccess, entitlements?.platformAccess],
+    queryFn: async (): Promise<{ signal: FullSignal } | { error: string }> => {
+      const res = await fetch("/api/signal/today", { cache: "no-store" });
+      const data = await res.json();
+      return data.ok ? { signal: data.signal } : { error: data.error ?? "ERROR" };
+    },
+    enabled: !!hasAccess,
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const signal = signalQuery.data && "signal" in signalQuery.data ? signalQuery.data.signal : null;
+  const signalError = signalQuery.data && "error" in signalQuery.data ? signalQuery.data.error : null;
+
+  return (
+    <section id="signal" className="scroll-mt-20 px-4 py-16">
+      <div className="mx-auto max-w-6xl">
+        <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="flex items-center gap-2.5 text-2xl font-black sm:text-3xl">
+              <Brain className="size-7 text-primary" />
+              {t("signal.title")}
+            </h2>
+            {preview && (
+              <p className="mt-2 text-sm text-muted-foreground">
+                {t("signal.day")}: <span className="font-mono font-bold">{preview.day}</span> ·{" "}
+                {preview.candlesUsed} {t("signal.candlesUsed")}
+              </p>
+            )}
+          </div>
+          {entitlements?.activeGrant && (
+            <Badge className="gap-1.5 bg-buy/15 px-3 py-1.5 text-buy ring-1 ring-buy/30">
+              <Sparkles className="size-3.5" />
+              {t("signal.subscribed")} ·{" "}
+              {new Date(entitlements.activeGrant.expiresAt).toLocaleDateString(locale === "fa" ? "fa-IR" : "en-US")}
+            </Badge>
+          )}
+        </header>
+
+        {authLoading ? (
+          <Skeleton className="h-80 w-full rounded-2xl" />
+        ) : !entitlements?.authenticated ? (
+          <ConnectGate />
+        ) : !entitlements.platformAccess ? (
+          <PlatformGate onPay={() => setProduct({ id: "PLATFORM_ACCESS", name: t("products.platform.name"), pricePengu: 5 })} />
+        ) : !hasAccess ? (
+          <DayPassGate onPay={(id, name, price) => setProduct({ id, name, pricePengu: price })} />
+        ) : signal ? (
+          <FullSignalCard signal={signal} locale={locale} />
+        ) : signalError ? (
+          <ErrorCard error={signalError} onRetry={() => signalQuery.refetch()} />
+        ) : (
+          <Skeleton className="h-80 w-full rounded-2xl" />
+        )}
+
+        {/* free consensus teaser (always visible) */}
+        {preview && !signal && (
+          <div className="glass-card shimmer mt-6 p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-sm font-bold">{t("signal.consensus")}</span>
+              <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground">
+                <Lock className="size-3" />
+                {t("signal.previewNote")}
+              </Badge>
+            </div>
+            <div className="relative h-3.5 overflow-hidden rounded-full bg-muted/60" dir="ltr">
+              <div className="absolute inset-0 flex">
+                <div
+                  className="bg-buy transition-all duration-500"
+                  style={{ width: `${(preview.consensus.bullish / preview.consensus.total) * 100}%` }}
+                />
+                <div
+                  className="bg-hold/60 transition-all duration-500"
+                  style={{ width: `${(preview.consensus.neutral / preview.consensus.total) * 100}%` }}
+                />
+                <div
+                  className="bg-sell transition-all duration-500"
+                  style={{ width: `${(preview.consensus.bearish / preview.consensus.total) * 100}%` }}
+                />
+              </div>
+            </div>
+            <div className="mt-2 flex justify-between text-xs font-semibold" dir="ltr">
+              <span className="text-buy">🐂 {preview.consensus.bullish} {t("signal.bullish")}</span>
+              <span className="text-hold">≅ {preview.consensus.neutral} {t("signal.neutral")}</span>
+              <span className="text-sell">🐻 {preview.consensus.bearish} {t("signal.bearish")}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <PaymentDialog key={product?.id ?? "none"} product={product} onClose={() => setProduct(null)} />
+    </section>
+  );
+}
+
+/* ---------------------------- gates ---------------------------- */
+
+function ConnectGate() {
+  const { t } = useI18n();
+  const { login, signIn, signingIn, walletStatus } = useAuth();
+  return (
+    <div className="glass-card flex flex-col items-center gap-5 px-6 py-14 text-center">
+      <span className="grid size-16 place-items-center rounded-2xl bg-primary/15 text-primary ring-2 ring-primary/30">
+        <Wallet className="size-8" />
+      </span>
+      <p className="max-w-md text-lg font-bold">{t("signal.connectFirst")}</p>
+      {walletStatus === "connected" ? (
+        <Button onClick={() => signIn()} size="lg" disabled={signingIn} className="gap-2 font-bold">
+          {signingIn && <Loader2 className="size-5 animate-spin" />}
+          {signingIn ? t("wallet.signing") : t("wallet.signInTitle")}
+        </Button>
+      ) : (
+        <Button onClick={login} size="lg" className="gap-2 px-8 font-bold">
+          <Wallet className="size-5" />
+          {t("nav.connect")}
+        </Button>
+      )}
+      <p className="max-w-sm text-xs leading-6 text-muted-foreground">{t("faq.a1")}</p>
+    </div>
+  );
+}
+
+function PlatformGate({ onPay }: { onPay: () => void }) {
+  const { t } = useI18n();
+  return (
+    <GateShell
+      icon={<Coins className="size-8" />}
+      title={t("signal.needPlatform")}
+      desc={t("signal.needPlatformDesc")}
+      price="5 PENGU"
+      onPay={onPay}
+      cta={t("products.choose")}
+    />
+  );
+}
+
+function DayPassGate({ onPay }: { onPay: (id: string, name: string, price: number) => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="glass-card flex flex-col items-center gap-5 px-6 py-12 text-center">
+      <span className="grid size-16 place-items-center rounded-2xl bg-hold/15 text-hold ring-2 ring-hold/30">
+        <Lock className="size-8" />
+      </span>
+      <p className="max-w-md text-lg font-bold">{t("signal.needDayPass")}</p>
+      <p className="max-w-md text-sm text-muted-foreground">{t("signal.needDayPassDesc")}</p>
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <Button onClick={() => onPay("DAY_PASS", t("products.dayPass.name"), 1)} size="lg" className="gap-2 font-bold">
+          <Sparkles className="size-5" />
+          {t("products.dayPass.name")} — 1 PENGU
+        </Button>
+        <Button
+          onClick={() => onPay("SUB_7", t("products.sub7.name"), 7)}
+          size="lg"
+          variant="outline"
+          className="gap-2 font-bold"
+        >
+          <Calendar className="size-5" />
+          {t("products.sub7.name")} — 7 PENGU
+        </Button>
+        <Button
+          onClick={() => onPay("SUB_30", t("products.sub30.name"), 30)}
+          size="lg"
+          variant="outline"
+          className="gap-2 font-bold"
+        >
+          <Calendar className="size-5" />
+          {t("products.sub30.name")} — 30 PENGU
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function GateShell({
+  icon,
+  title,
+  desc,
+  price,
+  onPay,
+  cta,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  price: string;
+  onPay: () => void;
+  cta: string;
+}) {
+  return (
+    <div className="glass-card flex flex-col items-center gap-5 px-6 py-14 text-center">
+      <span className="grid size-16 place-items-center rounded-2xl bg-primary/15 text-primary ring-2 ring-primary/30">{icon}</span>
+      <p className="max-w-md text-lg font-bold">{title}</p>
+      <p className="max-w-md text-sm text-muted-foreground">{desc}</p>
+      <Button onClick={onPay} size="lg" className="gap-2 px-8 font-bold">
+        <Coins className="size-5" />
+        {cta} — {price}
+      </Button>
+    </div>
+  );
+}
+
+function ErrorCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="glass-card flex flex-col items-center gap-4 px-6 py-12 text-center">
+      <span className="text-4xl">🐧💨</span>
+      <p className="font-bold">{error === "INSUFFICIENT_HISTORY" ? t("track.empty") : t("common.error")}</p>
+      <Button onClick={onRetry} variant="outline" className="gap-2">
+        {t("common.retry")}
+      </Button>
+    </div>
+  );
+}
+
+/* ------------------------- full signal ------------------------- */
+
+function FullSignalCard({ signal, locale }: { signal: FullSignal; locale: string }) {
+  const { t } = useI18n();
+  const actionColor =
+    signal.action === "BUY" ? "text-buy" : signal.action === "SELL" ? "text-sell" : "text-hold";
+  const actionBg =
+    signal.action === "BUY" ? "bg-buy" : signal.action === "SELL" ? "bg-sell" : "bg-hold";
+  const ActionIcon =
+    signal.action === "BUY" ? ArrowUpToLine : signal.action === "SELL" ? ArrowDownToLine : PauseCircle;
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+        {/* left: verdict */}
+        <div className="glass-card relative overflow-hidden p-6">
+          <div className={cn("absolute inset-x-0 top-0 h-1", actionBg)} />
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-medium text-muted-foreground">{t("signal.action")}</div>
+              <div className={cn("mt-1 flex items-center gap-2.5 text-4xl font-black tracking-tight", actionColor)}>
+                <ActionIcon className="size-9" />
+                {t(`signal.${signal.action}`)}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs font-medium text-muted-foreground">{t("signal.compositeScore")}</div>
+              <div className="font-mono text-3xl font-black" dir="ltr">
+                {signal.score > 0 ? "+" : ""}
+                {signal.score.toFixed(1)}
+              </div>
+            </div>
+          </div>
+
+          {/* confidence gauge */}
+          <div className="mt-6">
+            <div className="mb-1.5 flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1 font-semibold">
+                <Gauge className="size-3.5" />
+                {t("signal.confidence")}
+              </span>
+              <span className="font-mono font-bold">{signal.confidence}%</span>
+            </div>
+            <Progress value={signal.confidence} className="h-2.5" />
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              data quality: {(signal.dataQuality * 100).toFixed(0)}% · {signal.candlesUsed} {t("signal.candlesUsed")}
+            </div>
+          </div>
+
+          {/* levels grid */}
+          <div className="mt-6 grid grid-cols-2 gap-2.5">
+            <Level
+              label={t("signal.entryZone")}
+              value={signal.entryLow && signal.entryHigh ? `${fmt.price(signal.entryLow)} – ${fmt.price(signal.entryHigh)}` : null}
+            />
+            <Level label={t("signal.stopLoss")} value={fmt.price(signal.stopLoss)} danger />
+            <Level label={t("signal.takeProfit1")} value={fmt.price(signal.takeProfit1)} good />
+            <Level label={t("signal.takeProfit2")} value={fmt.price(signal.takeProfit2)} good />
+            <Level
+              label={t("signal.expectedRange")}
+              value={
+                signal.expectedRangeLow && signal.expectedRangeHigh
+                  ? `${fmt.price(signal.expectedRangeLow)} – ${fmt.price(signal.expectedRangeHigh)}`
+                  : null
+              }
+            />
+            <Level
+              label={t("signal.riskReward")}
+              value={signal.riskReward ? `1 : ${signal.riskReward.toFixed(2)}` : null}
+            />
+            <Level label={t("signal.support")} value={fmt.price(signal.support)} />
+            <Level label={t("signal.resistance")} value={fmt.price(signal.resistance)} />
+          </div>
+        </div>
+
+        {/* right: factors + reasoning */}
+        <div className="glass-card p-6">
+          <h3 className="flex items-center gap-2 text-sm font-bold">
+            <Target className="size-4 text-primary" />
+            {t("signal.factors")}
+          </h3>
+          <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pe-1 nice-scroll">
+            {signal.factors
+              .slice()
+              .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution))
+              .map((f) => {
+                const label = FACTOR_LABELS[f.key]?.[locale === "fa" ? "fa" : "en"] ?? f.key;
+                const pct = Math.min(100, Math.abs(f.score) * 100);
+                const pos = f.score >= 0;
+                return (
+                  <Tooltip key={f.key}>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center gap-3 rounded-lg border border-border/40 bg-muted/20 px-3 py-2">
+                        <span className="w-32 shrink-0 truncate text-xs font-semibold sm:w-40">{label}</span>
+                        <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted" dir="ltr">
+                          <div className="absolute left-1/2 top-0 h-full w-px bg-border" />
+                          <div
+                            className={cn("absolute top-0 h-full", pos ? "bg-buy" : "bg-sell")}
+                            style={
+                              pos
+                                ? { left: "50%", width: `${pct / 2}%` }
+                                : { right: "50%", width: `${pct / 2}%` }
+                            }
+                          />
+                        </div>
+                        <span
+                          className={cn(
+                            "w-14 shrink-0 text-left font-mono text-[11px] font-bold",
+                            pos ? "text-buy" : "text-sell",
+                          )}
+                          dir="ltr"
+                        >
+                          {f.score >= 0 ? "+" : ""}
+                          {f.score.toFixed(2)}
+                        </span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">
+                      {t("signal.weight")}: {f.weight} · contribution: {f.contribution >= 0 ? "+" : ""}
+                      {f.contribution.toFixed(1)}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+          </div>
+
+          <h3 className="mt-5 flex items-center gap-2 text-sm font-bold">
+            <Brain className="size-4 text-primary" />
+            {t("signal.reasoning")}
+          </h3>
+          <p className="mt-2 rounded-xl border border-border/50 bg-muted/20 p-4 text-[13px] leading-7">
+            {signal.reasoning[locale === "fa" ? "fa" : "en"]}
+          </p>
+          <p className="mt-3 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <Info className="size-3" />
+            {t("footer.disclaimer")}
+          </p>
+        </div>
+      </div>
+    </TooltipProvider>
+  );
+}
+
+function Level({
+  label,
+  value,
+  good,
+  danger,
+}: {
+  label: string;
+  value: string | null;
+  good?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-muted/20 px-3 py-2">
+      <div className="text-[10px] font-medium text-muted-foreground">{label}</div>
+      <div
+        dir="ltr"
+        className={cn(
+          "mt-0.5 font-mono text-sm font-bold",
+          good && "text-buy",
+          danger && "text-sell",
+        )}
+      >
+        {value ?? "—"}
+      </div>
+    </div>
+  );
+}
