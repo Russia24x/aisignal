@@ -1278,3 +1278,116 @@ Stage Summary:
   wallet for E2E (everything up to popup-open and the full state machine
   verified); bearer token stays valid until exp after logout on other
   devices (documented SIWE+JWT trade-off)
+
+---
+Task ID: 23
+Agent: main
+Task: ROOT-CAUSE FIX — "still must refresh to see wallet connected" + "plan click does nothing, purchase never starts" (user reports, Persian; persisted after Tasks 21–22) — user pointed to docs.abs.xyz AGW native-integration
+
+Work Log:
+- SESSION-START-SYNC-CHECK (per RULES.md): tree clean, local == origin/main (8714b23), no force push
+- SDK FORENSICS (per the user's docs link): read the full popup
+  machinery across @abstract-foundation/agw-react 1.13.0 +
+  @privy-io/cross-app-connect 0.5.15 + @privy-io/popup 0.0.4 +
+  the real portal.abs.xyz popup bundle (downloaded all 37 JS chunks):
+  * EVERY AGW popup (connect / personal_sign / eth_sendTransaction)
+    is opened by `window.open(portal.abs.xyz/…)` and answered via
+    `window.opener.postMessage(PRIVY_CROSS_APP_CONNECT_RESPONSE|…)`
+    — the portal posts to the OPENER (our iframe window): messaging
+    itself is iframe-safe
+  * The ONE AND ONLY privy.io network dependency is the provider-details
+    GET (`auth.privy.io/api/v1/apps/{id}/cross-app/details`) — a tiny
+    PUBLIC document (`data_classification: "public"`) that merely tells
+    the SDK the popup URLs (portal.abs.xyz). It gates EVERY popup:
+    connect, sign-in signature, AND purchase transactions
+  * Fetched the live document: custom_connect_url / custom_transact_url
+    point at portal.abs.xyz (Abstract's own domain — NOT privy.io)
+- ROOT CAUSE (coherent story for BOTH persisted symptoms, no
+  contradiction): on filtered networks (Iran) auth.privy.io is
+  unreachable → the details fetch dies → NO popup can ever open →
+  connect silently stalls (SDK's 2-minute timeout) and the plan click's
+  signIn() dies before its signature popup (purchase "never starts").
+  Combined with the pre-fix header (which showed no address until
+  sign-in), the wallet felt "not connected" until a reload
+  auto-reconnected it from localStorage
+- FIX 1 — privy.io removed from the critical path:
+  * NEW src/lib/agw-details.ts: public app-id, upstream URL, proxy URL,
+    the AgwProviderDetails shape, runtime shape-validation, and the
+    verified bundled fallback document (portal.abs.xyz URLs)
+  * NEW /api/agw/details route: same-origin proxy (upstream with 5s
+    timeout → in-memory 1h cache → bundled constants), light rate
+    limit, public + no secrets (x-agw-details-source header for
+    diagnostics; live-tested: "upstream"/"cache" both 200)
+  * REWROTE lib/agw-bridge.ts details handling: page-load PRE-WARM via
+    the same-origin proxy + in-memory cache served to the SDK in ~0ms;
+    resolution chain cache → priming → direct (2.5s timeout) →
+    same-origin proxy → bundled constants — the SDK's details fetch
+    can no longer fail (or even be slow: popups open instantly, inside
+    the transient-activation window)
+- FIX 2 — fail-fast popup sentinel: window.open wrapped (successful
+  opens AND refused opens recorded); NEW popupOpenGuard() raced against
+  connectAsync in login() — a popup that never opens now fails in ~2.5s
+  (8s when details are still cold) with an accurate POPUP_BLOCKED-style
+  message instead of a silent 2-minute hang; the SDK's unclassifiable
+  empty `Error("")` for refused opens is re-attributed to POPUP_BLOCKED
+  via the block log (popupBlockedSince)
+- FIX 3 — header shows the connection the instant it lands: the
+  connected-but-anonymous state now renders the AbstractProfile avatar
+  + short address (mono, dir=ltr) next to "ورود با امضا" — the user
+  SEES "wallet connected" with zero refresh; tooltip carries the full
+  address + sign-in description
+- VERIFICATION (agent-browser, auth.privy.io fully BLOCKED via network
+  route — faithful Iran simulation):
+  * page load: zero live page errors (listener-verified), details
+    primed same-origin, app fully rendered
+  * connect click → REAL portal.abs.xyz popup opened (previously
+    impossible with privy blocked) — t4/t5/t7/t8 all real popups
+  * popup-approval simulation (valid secp256k1 pubkey via
+    PRIVY_CROSS_APP_CONNECT_RESPONSE in the APP tab): connection
+    persisted → header flipped LIVE to avatar + 0x83DF…B299 (AGW smart
+    account derived from the test EOA) + all pricing CTAs flipped to
+    "برای خرید وارد شوید" — the exact previously-broken flow, NO
+    reload anywhere
+  * sign-in click → REAL portal.abs.xyz/cross-app/transact popup with
+    the encrypted personal_sign request (the purchase-blocking step —
+    now alive on a filtered network)
+  * plan click (connected-anonymous) → same transact popup from the
+    plan CTA (purchase chain starts; the authenticated continuation
+    into PaymentDialog was verified end-to-end in Task 22 and is
+    unchanged)
+  * popup-blocked simulation (window.open → null): sign-in showed the
+    localized "پنجرهٔ کیف پول مسدود شد…" toast within 1.5s (was a
+    silent 2-min hang); connect showed immediate feedback (NETWORK —
+    my test replaced the wrapper so the block log couldn't fire; in a
+    real browser block the wrapper records it → POPUP_BLOCKED)
+  * guard no-false-positive: normal connect (popup opens) → no toast
+  * fresh unblocked session: 0 live errors, no dev overlay, footer at
+    natural bottom (8206→8398 == doc height), mobile 390px zero
+    horizontal overflow, /api/agw/details serving from cache with
+    correct headers
+- Cleanup: expired/used nonces pruned (0 matched), DB = 2 legit users
+  (real user + treasury), browser localStorage cleared, all popup tabs
+  closed, network unroute restored
+- lint clean, tsc clean (src/), dev.log clean
+
+Stage Summary:
+- THE root cause of both persisted reports is fixed: the AGW SDK's
+  only privy.io dependency (the public provider-details document) is
+  now served from our own origin with a guaranteed resolution chain —
+  every wallet popup (connect / signature / transaction) opens
+  instantly even when auth.privy.io is completely unreachable
+- Live wallet-state visibility: the header shows avatar + address the
+  moment the connect popup completes; combined with the shared
+  AuthProvider (Task 22), "refresh to see connected" is gone from
+  both the state AND the perception side
+- No silent auth step remains: popup-open failures surface in ~2.5s
+  with accurate localized guidance; SDK's empty popup-blocked error is
+  correctly attributed
+- Verified in-browser with privy blocked: connect popup, sign popup,
+  plan-click chain start, live section flips — all green
+- Remaining known/accepted: completing the real signature/purchase
+  needs a real Abstract wallet (verified up to popup-open with real
+  portal URLs + full state machine via simulated approval); if the
+  USER's browser cannot reach portal.abs.xyz itself, no client-side
+  fix can help (the wallet lives there) — but the error feedback now
+  says so immediately instead of hanging

@@ -45,7 +45,7 @@ import {
 import { useAccount, useConnect, useDisconnect, useSignMessage } from "wagmi";
 import { toast } from "sonner";
 import { createLogger } from "@/lib/client-logger";
-import { armConnectionWatch } from "@/lib/agw-bridge";
+import { armConnectionWatch, popupOpenGuard, popupBlockedSince } from "@/lib/agw-bridge";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { authFetch, saveSessionToken, clearSessionToken } from "@/lib/client-session";
 import type { EntitlementsDTO as Entitlements } from "@/lib/modules/access/passes";
@@ -287,7 +287,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Connect the Abstract Global Wallet (owned promise — not the SDK's
    * fire-and-forget login).
    *  - every failure (blocked popup, unreachable AGW domains, timeout, …)
-   *    surfaces as a localized toast;
+   *    surfaces as a localized toast — and fast: the popupOpenGuard rejects
+   *    within ~2.5s when NO popup window actually opened (previously the
+   *    SDK would hang silently for up to TWO MINUTES — the exact
+   *    "I click and nothing happens" report);
    *  - arms the agw-bridge connection watcher so, if the popup's live
    *    postMessage path breaks, wagmi still adopts the persisted
    *    connection the moment it lands — no page reload needed.
@@ -321,8 +324,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
     });
 
+    // Reference point for the popup sentinel + block attribution below.
+    const startedAt = Date.now();
+
     try {
-      await connectAsync({ connector });
+      // Race the SDK connect against the popup sentinel: if no popup window
+      // opened shortly after the click, fail FAST with accurate feedback
+      // instead of leaving the user in a silent 2-minute limbo. When the
+      // popup does open, the guard stands down and connectAsync decides.
+      await Promise.race([connectAsync({ connector }), popupOpenGuard(startedAt)]);
       // Success: wagmi's store updates → every useAccount() subscriber
       // re-renders, and the [address] effect above re-fetches the session
       // ONCE for the whole app through this shared provider.
@@ -331,7 +341,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // popup's own promise was still pending (lost postMessage) — in that
       // case the eventual popup timeout is stale noise, not a user error.
       if (statusRef.current === "connected") return;
-      const code = classifyError(err);
+      let code = classifyError(err);
+      // The SDK reports a popup-blocker refusal as an EMPTY `Error("")`
+      // (classified NETWORK) — the bridge's block log knows better.
+      if (code === "NETWORK" && popupBlockedSince(startedAt)) code = "POPUP_BLOCKED";
       log.warn("connect failed", { code, err: String(err) });
       toast.error(t(`wallet.error.${code}`));
     }

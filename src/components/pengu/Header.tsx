@@ -224,10 +224,21 @@ export function Header() {
               needsSignIn &&
                 "ring-2 ring-primary/60 ring-offset-2 ring-offset-background animate-[pulse-glow_2s_ease-in-out_infinite]",
             )}
-            title={t("wallet.signInDesc")}
+            title={`${t("wallet.connected")}: ${address}\n${t("wallet.signInDesc")}`}
           >
-            {signingIn ? <Loader2 className="size-4 animate-spin" /> : <PenLine className="size-4" />}
-            <span className="hidden sm:inline">{signingIn ? t("wallet.signing") : t("wallet.signInTitle")}</span>
+            {signingIn ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <PenLine className="size-4" />
+            )}
+            {/* The user must SEE the wallet is connected the instant the
+                popup completes — the address is proof, no refresh needed
+                (this was the exact "refresh to show connected" report). */}
+            <AbstractProfile address={address} size="sm" showTooltip={false} className="-my-1" />
+            <span className="font-mono text-xs" dir="ltr">
+              {short(address!)}
+            </span>
+            <span className="hidden lg:inline">{signingIn ? t("wallet.signing") : t("wallet.signInTitle")}</span>
           </Button>
         )}
       </div>
