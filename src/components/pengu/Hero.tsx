@@ -78,12 +78,16 @@ export function Hero() {
             </a>
           </div>
 
-          {/* stats row */}
+          {/* stats row — the 5th card spans the full row on mobile so the
+              2-col grid never leaves an orphan cell */}
           <div className="mt-9 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {stats.map((st) => (
+            {stats.map((st, i) => (
               <div
                 key={st.label}
-                className="glass-card group px-3.5 py-3 transition-transform hover:-translate-y-0.5 hover:bg-card/80"
+                className={cn(
+                  "glass-card group px-3.5 py-3 transition-transform hover:-translate-y-0.5 hover:bg-card/80",
+                  i === stats.length - 1 && "col-span-2 sm:col-span-1",
+                )}
               >
                 <div className="text-[11px] font-medium text-muted-foreground">{st.label}</div>
                 <div

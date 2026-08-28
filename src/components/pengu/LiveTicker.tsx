@@ -15,7 +15,7 @@
  */
 import { useMarket, fmt } from "./useMarket";
 import { cn } from "@/lib/utils";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, RefreshCw } from "lucide-react";
 
 interface StatProps {
   label: string;
@@ -123,9 +123,10 @@ export function LiveTicker() {
 
         {hasData && (
           <span
-            className="ms-auto shrink-0 text-muted-foreground/50"
+            className="ms-auto flex shrink-0 items-center gap-1 text-muted-foreground/50"
             title="Server-cached snapshot — refreshed every ~60s"
           >
+            <RefreshCw className="size-3" aria-hidden />
             ~60s
           </span>
         )}

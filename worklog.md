@@ -973,3 +973,57 @@ Stage Summary:
 - Next candidates: admin panel (owner view of users/payments), Telegram
   alert delivery, KV rate limiting for Workers, per-signal tooltip detail
   on the curve
+
+---
+Task ID: 19
+Agent: main
+Task: Honor user correction — remove unauthorized auto-review artifacts; focus ONLY on polish + fixes of the existing product (user request, Persian)
+
+Work Log:
+- USER DIRECTIVE: the 15-min webDevReview cron task was created WITHOUT the
+  user's request, and the roadmap (admin panel / Telegram alerts / KV rate
+  limiting) is outside their instructions — focus exclusively on polish and
+  fixing what is already built. No new features.
+- Deleted cron job 342947 "PenguSignals Auto Dev Review (15min)" — cron list
+  now empty; no recurring auto-dev task will be created
+- Discovered commit 11b2b24 (UUID message, authored by the unauthorized
+  auto-task) = exactly the rejected "admin panel" roadmap item: 1091 lines
+  (3 API routes, AdminPanel.tsx, admin.ts, i18n keys, ADMIN_ADDRESSES env).
+  AdminPanel was never even imported (dead code). Reverted cleanly via
+  `git revert 11b2b24` (commit 95faef3, normal commit — no force push per
+  RULES.md); removed ADMIN_ADDRESSES from local .env
+- QA PASS (agent-browser, fresh sessions): 0 page errors, 0 console errors;
+  chart tabs, FAQ accordion, FA↔EN/RTL switch all work; mobile 390px no
+  overflow, footer at natural bottom; pricing buttons measured aligned
+  (VLM's "staircase" claim disproven by bounding-box measurement)
+- Verified prior fixes still healthy: auth rate limit 30/min (old
+  RATE_LIMITED blocker stays fixed), popup-blocker root fix intact
+- POLISH FIXES (4):
+  1. PricingSection dead buttons: all 6 CTAs were disabled for anonymous
+     visitors. Now enabled — click continues the auth chain from the user
+     gesture (not connected → login(); connected → signIn()), exactly the
+     SignalSection ConnectGate pattern (popup-safe per AGW docs). Verified
+     live: click on "Choose plan" opened the official portal.abs.xyz
+     connect popup with correct params (requester_public_key,
+     provider_app_id, origin). Wallet icon + spinner states on the buttons;
+     owned → disabled "Current plan" (unchanged)
+  2. Strikethrough old-price contrast: text-muted-foreground/80 → full
+     opacity (a11y)
+  3. Hero stats: 5th card now col-span-2 on mobile (was an orphan half-row
+     in the 2-col grid); verified last card spans full 358px width
+  4. LiveTicker ~60s badge: added RefreshCw icon + existing tooltip
+- VLM re-review after fixes: "pricing card buttons perfectly aligned,
+  visual defects: none"
+- lint clean, tsc clean, dev.log clean (dev server restarted with proper
+  dev.log redirect after a mid-edit Fast-Refresh crash)
+
+Stage Summary:
+- Unauthorized artifacts fully removed: 15-min cron deleted + admin-panel
+  commit reverted (repo = user-approved features only)
+- Product polished within existing scope: no dead buttons, better a11y
+  contrast, mobile grid fixed, clearer ticker badge
+- All existing features verified end-to-end in browser (fresh session,
+  zero errors, official AGW popup from pricing CTA confirmed)
+- Next-phase recommendation per user scope: continue polish/QA cycles on
+  existing sections only (e.g. deeper a11y pass, loading skeletons), NO
+  new features unless the user asks

@@ -19,9 +19,11 @@ import {
   Crown,
   Eye,
   Gem,
+  Loader2,
   Sparkles,
   Ticket,
   TrendingDown,
+  Wallet,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -44,11 +46,23 @@ const TIER_META: Record<AccessPassId, { icon: LucideIcon; i18nKey: string; highl
 
 export function PricingSection() {
   const { t } = useI18n();
-  const { entitlements } = useAuth();
+  const { entitlements, login, signIn, walletStatus, signingIn } = useAuth();
   const [product, setProduct] = useState<PaymentProduct | null>(null);
 
   const activeProduct = entitlements?.activeGrant?.product ?? null;
   const hasPass = !!entitlements?.signalAccess;
+  const authenticated = !!entitlements?.authenticated;
+
+  /**
+   * Continue the auth chain from THIS click — the AGW connect/signature
+   * popups are `window.open` calls that browsers only honour inside a user
+   * gesture, so a click here is exactly the right trigger (same pattern as
+   * SignalSection's ConnectGate). No dead disabled buttons for visitors.
+   */
+  const startAuth = () => {
+    if (walletStatus === "connected") void signIn();
+    else login();
+  };
 
   return (
     <section id="pricing" className="scroll-mt-20 px-4 py-16">
@@ -74,15 +88,24 @@ export function PricingSection() {
               <span className="font-mono text-3xl font-black text-primary">0</span>
               <span className="text-xs font-bold text-muted-foreground">PENGU</span>
             </div>
-            <Button className="mt-4 w-full gap-1.5 font-bold" variant="outline" disabled>
-              {entitlements?.authenticated && !hasPass ? (
-                <>
-                  <Check className="size-4" />
-                  {t("products.currentPlan")}
-                </>
+            <Button
+              className="mt-4 w-full gap-1.5 font-bold"
+              variant="outline"
+              disabled={authenticated || signingIn}
+              onClick={startAuth}
+            >
+              {signingIn ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : authenticated && !hasPass ? (
+                <Check className="size-4" />
               ) : (
-                t("products.free.cta")
+                <Wallet className="size-4" />
               )}
+              {authenticated && !hasPass
+                ? t("products.currentPlan")
+                : signingIn
+                  ? t("wallet.signing")
+                  : t("products.free.cta")}
             </Button>
           </div>
 
@@ -130,7 +153,7 @@ export function PricingSection() {
                 <div className="mt-4 flex flex-col gap-0.5" dir="ltr">
                   <div className="flex flex-wrap items-baseline gap-1.5">
                     {hasDiscount && (
-                      <span className="self-center font-mono text-xs font-medium text-muted-foreground/80 line-through decoration-sell/60">
+                      <span className="self-center font-mono text-xs font-medium text-muted-foreground line-through decoration-sell/70">
                         {pass.basePricePengu.toLocaleString("en-US")}
                       </span>
                     )}
@@ -151,24 +174,37 @@ export function PricingSection() {
                 <Button
                   className="mt-4 w-full gap-1.5 font-bold"
                   variant={meta.highlight ? "default" : "outline"}
-                  disabled={!entitlements?.authenticated || !!owned}
-                  onClick={() => setProduct({ id: pass.id, name, pricePengu: pass.pricePengu })}
+                  disabled={!!owned || signingIn}
+                  onClick={() => {
+                    if (!authenticated) {
+                      startAuth();
+                      return;
+                    }
+                    setProduct({ id: pass.id, name, pricePengu: pass.pricePengu });
+                  }}
                 >
                   {owned ? (
                     <>
                       <Check className="size-4" />
                       {t("products.currentPlan")}
                     </>
+                  ) : signingIn && !authenticated ? (
+                    <Loader2 className="size-4 animate-spin" />
                   ) : (
-                    t("products.choose")
+                    !authenticated && <Wallet className="size-4" />
                   )}
+                  {owned
+                    ? t("products.currentPlan")
+                    : signingIn && !authenticated
+                      ? t("wallet.signing")
+                      : t("products.choose")}
                 </Button>
               </div>
             );
           })}
         </div>
 
-        {!entitlements?.authenticated && (
+        {!authenticated && (
           <p className="mt-5 text-center text-xs text-muted-foreground">{t("signal.connectFirst")}</p>
         )}
       </div>
