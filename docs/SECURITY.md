@@ -127,8 +127,8 @@ payload = { sub, addr, iat, exp, jti }
 1. **Rate limiter درون‌حافظه است** → در استقرار multi-instance، هر isolate پنجرهٔ خودش را دارد (برای Cloudflare Workers باید به Rate Limiting binding مهاجرت شود — مستند در DEPLOYMENT.md)
 2. **Sessionها stateless هستند** → revoke فوری همهٔ سشن‌ها = تغییر SESSION_SECRET (فهرست revoke جانبی وجود ندارد)
 3. **Finality نرم برای اعتباردهی** — برای مبالغ خرد عرف است؛ پایش L1 در نقشهٔ راه
-4. **سرویس ws-ticker** صندلی sandbox است (در deployed آینده باید با Durable Objects یا چرخهٔ polling جایگزین شود)
-5. امضای پیام (برخلاف تراکنش) در AGW popup باز می‌کند و ممکن است popup blocker آن را بگیرد — با پیام خطای دقیق (`POPUP_BLOCKED`) و دکمهٔ تلاش مجدد مدیریت می‌شود
+4. **تیکر قیمت** کاملاً REST است (poll ۶۰ ثانیه با کش سرور) — هیچ سرویس سوکت/زیرساخت اضافه‌ای برای استقرار لازم نیست
+5. امضای پیام (برخلاف تراکنش) در AGW popup باز می‌کند — مطابق الگوی رسمی Abstract فقط از کلیک کاربر فراخوانی می‌شود (نه از effect خودکار) تا popup blocker مرورگر آن را مسدود نکند؛ در حالت بلاک شدن نیز پیام خطای دقیق (`POPUP_BLOCKED`) و دکمهٔ تلاش مجدد ارائه می‌شود
 
 ---
 

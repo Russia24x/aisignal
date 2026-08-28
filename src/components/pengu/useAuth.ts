@@ -3,12 +3,26 @@
 /**
  * Auth bridge: wallet connection (wagmi/AGW) ⇄ server session.
  *
- * Flow:
- *  1. `login()` opens the AGW modal (useLoginWithAbstract)
- *  2. once a wallet is connected, `signIn()` fetches a server-prepared
- *     message (nonce-bound), asks the wallet to sign it, and posts the
- *     signature to /api/auth/verify — establishing an HMAC session cookie
- *  3. `session` exposes server-side entitlements (paid access state)
+ * Flow (popup-safe — follows the official AGW integration pattern from
+ * docs.abs.xyz / Abstract-Foundation examples):
+ *  1. `login()` opens the AGW connect popup — ALWAYS from a click handler.
+ *  2. `signIn()` (also click-triggered only) fetches a server-prepared
+ *     message (nonce-bound), asks the wallet to sign it in the AGW popup,
+ *     and posts the signature to /api/auth/verify — establishing an HMAC
+ *     session cookie.
+ *  3. `session` exposes server-side entitlements (paid access state).
+ *
+ * POPUP-BLOCKER SAFETY (root-cause fix, per official docs + SDK source):
+ *  - Every AGW action (connect / sign / transact) opens a 440×680 popup via
+ *    plain `window.open` (`@privy-io/cross-app-connect` → `@privy-io/popup`).
+ *    Browsers only honour `window.open` inside a user gesture (transient
+ *    activation ≈5s). This hook therefore NEVER auto-triggers `signIn()`
+ *    from an effect — the signature popup would open without a gesture and
+ *    get blocked ("Failed to initialize request"). The official Abstract
+ *    `agw-signing-messages` example also signs exclusively from clicks.
+ *  - The privy cross-app client fetches provider details (auth.privy.io)
+ *    lazily on first use; we pre-warm it on mount so the connect popup
+ *    opens as fast as possible inside the click's activation window.
  *
  * `signIn()` NEVER throws: it returns `{ ok, errorCode }` with a stable
  * error code (RATE_LIMITED, SIGNATURE_REJECTED, …) that callers map to a
@@ -18,7 +32,7 @@
  * @module components/pengu/useAuth
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAccount, useSignMessage } from "wagmi";
+import { useAccount, useConnect, useSignMessage } from "wagmi";
 import { useLoginWithAbstract } from "@abstract-foundation/agw-react";
 import { createLogger } from "@/lib/client-logger";
 import type { EntitlementsDTO as Entitlements } from "@/lib/modules/access/passes";
@@ -91,6 +105,7 @@ export function useAuth() {
   const { address, status, chainId } = useAccount();
   const { login, logout: walletLogout } = useLoginWithAbstract();
   const { signMessageAsync } = useSignMessage();
+  const { connectors } = useConnect();
 
   const [state, setState] = useState<SessionState>({
     loading: true,
@@ -98,7 +113,6 @@ export function useAuth() {
     signingIn: false,
     error: null,
   });
-  const triedAutoSignIn = useRef<string | null>(null);
 
   /** Fetch current session state from the server. */
   const refresh = useCallback(async (): Promise<Entitlements | null> => {
@@ -123,11 +137,36 @@ export function useAuth() {
   }, [refresh]);
 
   /**
+   * Pre-warm the AGW (privy cross-app) provider after mount.
+   *
+   * The cross-app client lazily fetches provider details from auth.privy.io
+   * before it can open the connect popup. Warming it up once at mount
+   * means the popup opens ~instantly when the user later clicks
+   * "Connect Wallet" — comfortably inside the browser's transient-activation
+   * window, which is what keeps the popup from being blocked.
+   */
+  const warmed = useRef(false);
+  useEffect(() => {
+    if (warmed.current) return;
+    warmed.current = true;
+    void (async () => {
+      try {
+        const agw = connectors.find((c) => c.id === "xyz.abs.privy" || c.type === "privy");
+        if (agw) await agw.getProvider(); // fires the details fetch; harmless
+      } catch {
+        /* pre-warm is best-effort only */
+      }
+    })();
+  }, [connectors]);
+
+  /**
    * Request a server message + signature + session establishment.
+   * MUST be called from a click handler: the AGW signature popup is a
+   * `window.open`, which browsers only allow inside a user gesture.
    * Never throws — inspect the returned result instead.
    */
   const signIn = useCallback(
-    async (silent = false): Promise<SignInResult> => {
+    async (): Promise<SignInResult> => {
       if (!address) return { ok: false, errorCode: "NETWORK" };
       setState((s) => ({ ...s, signingIn: true, error: null }));
       const fail = (code: SignInErrorCode): SignInResult => {
@@ -170,32 +209,31 @@ export function useAuth() {
     [address, signMessageAsync, refresh],
   );
 
-  // auto sign-in once per connected address (seamless UX)
-  useEffect(() => {
-    if (status === "connected" && address && !state.entitlements?.authenticated && !state.signingIn) {
-      if (triedAutoSignIn.current !== address) {
-        triedAutoSignIn.current = address;
-        void (async () => {
-          await signIn(true);
-        })();
-      }
-    }
-  }, [status, address, state.entitlements?.authenticated, state.signingIn, signIn]);
+  // NOTE: no automatic sign-in effect here. Opening the AGW signature
+  // popup without a user gesture is exactly what gets it blocked by
+  // browsers (official AGW examples sign from explicit clicks only).
+  // The Header / SignalSection CTAs cover the connected-but-signed-out
+  // state — `needsSignIn` below tells the UI when to highlight them.
 
   /** Full logout: server session + wallet disconnect. */
   const signOut = useCallback(async () => {
     await fetch("/api/auth/session", { method: "DELETE" }).catch(() => undefined);
-    triedAutoSignIn.current = null;
     setState({ loading: false, entitlements: null, signingIn: false, error: null });
     await refresh();
     walletLogout();
   }, [refresh, walletLogout]);
+
+  /** true when the wallet is connected but the server session is missing —
+   *  the UI uses this to highlight the (click-triggered) sign-in CTA. */
+  const needsSignIn =
+    status === "connected" && !!address && !state.loading && !state.entitlements?.authenticated;
 
   return {
     address,
     walletStatus: status,
     chainId,
     ...state,
+    needsSignIn,
     login,
     signIn,
     signOut,

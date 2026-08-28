@@ -1,19 +1,18 @@
 "use client";
 
 /**
- * LiveTicker — thin horizontal marquee bar rendered directly under the Header.
+ * LiveTicker — thin horizontal bar rendered directly under the Header.
  *
- * Streams the PENGU/USD price over the ws-ticker socket (via `useTicker`).
- * When the socket feed is unavailable (service down / blocked proxy), it
- * transparently falls back to the REST snapshot from `useMarket`
- * (same data, ~60s server-cached freshness) so the bar always shows real
- * numbers instead of a dead "loading…" state.
+ * Single feed: the server-cached REST snapshot from /api/market/overview
+ * (useMarket, ~60s freshness). This is the ONLY mode — it runs identically
+ * on the dev sandbox and on Cloudflare Workers (free tier), where a
+ * separate socket.io service cannot run. The old ws-ticker mini-service
+ * was removed for full free-tier compliance.
  *
  * Always LTR — numeric content, regardless of the active i18n locale.
  *
  * @module components/pengu/LiveTicker
  */
-import { useTicker } from "@/hooks/useTicker";
 import { useMarket, fmt } from "./useMarket";
 import { cn } from "@/lib/utils";
 import { ArrowDown, ArrowUp } from "lucide-react";
@@ -49,21 +48,17 @@ function Sep() {
 }
 
 export function LiveTicker() {
-  const ticker = useTicker();
   const market = useMarket();
 
-  // Primary: socket feed (15s freshness). Fallback: REST snapshot (~60s,
-  // server-cached) whenever the socket has not delivered a tick yet.
   const rest = market.data?.snapshot ?? null;
-  const price = ticker.price ?? rest?.priceUsd ?? null;
-  const change24h = ticker.change24h ?? rest?.change24h ?? null;
-  const volume24h = ticker.volume24h ?? rest?.volume24hUsd ?? null;
-  const liquidityUsd = ticker.liquidityUsd ?? rest?.liquidityUsd ?? null;
-  const fdv = ticker.fdv ?? rest?.fdvUsd ?? null;
-  const fetchedAt = ticker.fetchedAt ?? rest?.fetchedAt ?? null;
-  const connected = ticker.connected;
-  // live = socket feed active; degraded = showing REST fallback data
-  const live = ticker.connected || ticker.price !== null;
+  const price = rest?.priceUsd ?? null;
+  const change24h = rest?.change24h ?? null;
+  const volume24h = rest?.volume24hUsd ?? null;
+  const liquidityUsd = rest?.liquidityUsd ?? null;
+  const fdv = rest?.fdvUsd ?? null;
+  const fetchedAt = rest?.fetchedAt ?? null;
+  // live = a fresh REST snapshot is rendering (auto-poll every 60s)
+  const live = !!rest && !market.error;
 
   const hasData = price !== null;
   const positive = (change24h ?? 0) >= 0;
@@ -126,10 +121,10 @@ export function LiveTicker() {
           <span className="shrink-0 text-muted-foreground/60">loading…</span>
         )}
 
-        {!live && hasData && (
+        {hasData && (
           <span
             className="ms-auto shrink-0 text-muted-foreground/50"
-            title="Live socket unavailable — showing 60s cached data"
+            title="Server-cached snapshot — refreshed every ~60s"
           >
             ~60s
           </span>

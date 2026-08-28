@@ -54,13 +54,13 @@
 - **ماژول‌های دامنه** (`src/lib/modules/`): `market` (داده + cache)، `analysis` (موتور ۱۱-اندیکاتوری + سرویس سیگنال)، `access` (entitlements/passes/payments)، `alerts`
 - **امنیت** (`src/lib/security/`): `siwe.ts` (nonce/پیام/verify)، `session.ts` (HMAC cookie)، `rate-limit.ts` (پنجرهٔ لغزان)
 - **Cache**: `TTLCache` درون‌حافظه با stale-while-revalidate (بدون ترافیک = صفر فراخوانی upstream)
-- **Mini-service**: `mini-services/ws-ticker` (socket.io، پورت ۳۰۳۳، polling تطبیقی 15s فعال/60s idle) — از گیت‌وی با `?XTransformPort=3033` — فقط توسعهٔ محلی (در مخزن نیست؛ پروداکشن: حالت REST با `NEXT_PUBLIC_TICKER_WS=off`)
+- **تیکر قیمت**: حالت واحد REST — `useMarket` هر ۶۰ ثانیه `/api/market/overview` را می‌گیرد (کش سروری از منابع بالادستی محافظت می‌کند). سرویس socket.io قبلی برای انطباق کامل با لایهٔ رایگان Cloudflare حذف شد
 
 ## منابع دادهٔ خارجی (سقف مصرف)
 
 | منبع | مصرف | سقف مجاز |
 |---|---|---|
-| DexScreener | ≤60/hr اپ (cache 60s) + ws-ticker ≤240/hr فعال / 60/hr idle | 300 req/min |
+| DexScreener | ≤60/hr اپ (cache 60s) | 300 req/min |
 | CoinGecko | ≤6/hr (cross-check هر ۱۰مین snapshot) | demo ~10-30 req/min |
 | Binance | ~4/hr (کندل 15min TTL) | 1200 weight/min |
 | RPC Abstract | per-request (verify/verifyMessage) | عمومی |

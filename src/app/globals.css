@@ -318,6 +318,13 @@
 }
 .pulse-ring { animation: pulse-ring 2s infinite; }
 
+/* Sign-in CTA attention glow — wallet connected, session pending.
+   Gentle breathing ring instead of an aggressive flash. */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.72 0.16 165 / 0.0), 0 0 12px 2px oklch(0.72 0.16 165 / 0.25); }
+  50% { box-shadow: 0 0 0 4px oklch(0.72 0.16 165 / 0.12), 0 0 22px 6px oklch(0.72 0.16 165 / 0.45); }
+}
+
 /* Hero CTA glow on hover */
 .cta-glow {
   box-shadow: 0 0 0 0 oklch(0.72 0.16 165 / 0);

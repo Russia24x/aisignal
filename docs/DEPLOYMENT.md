@@ -21,7 +21,8 @@
 - `src/lib/db.ts` — به‌صورت خودکار روی Workers از D1 و به‌صورت محلی از SQLite استفاده می‌کند
 - `prisma/schema.prisma` — `driverAdapters` فعال است (سازگار با D1)
 - اسکریپت‌های `npm run preview` و `npm run deploy` در `package.json`
-- سوییچ `NEXT_PUBLIC_TICKER_WS` — حالت REST برای پروداکشن (توضیح در گام ۵)
+- تیکر قیمت با حالت واحد REST (~۶۰ ثانیه، کش سرور) — روی sandbox و Workers
+  یکسان کار می‌کند؛ هیچ سرویس سوکتی وجود ندارد و هیچ تنظیمی لازم نیست
 
 ## گام ۰ — پیش‌نیازها
 
@@ -71,18 +72,11 @@ npx wrangler secret put SESSION_SECRET   # مقدار بالا را پیست ک�
 
 > `SESSION_SECRET` هرگز در `wrangler.jsonc` یا `.env` کامیت‌شده قرار نمی‌گیرد.
 
-## گام ۵ — حالت پروداکشن تیکر (REST)
+## گام ۵ — متغیرهای محیطی
 
-سرویس socket.io (`mini-services/ws-ticker`) فقط برای توسعهٔ محلی است و روی
-Workers اجرا نمی‌شود. قبل از build، در فایل `.env` (یا `.env.production`) قرار دهید:
-
-```bash
-NEXT_PUBLIC_TICKER_WS=off
-```
-
-در این حالت LiveTicker به‌طور خودکار از دادهٔ REST با تازگی ~۶۰ ثانیه
-(`/api/market/overview` با کش سرور) استفاده می‌کند — بدون هیچ خطا یا تلاش ناموفق
-برای اتصال سوکت. (برای توسعهٔ محلی دوباره `on` بگذارید یا خط را حذف کنید.)
+تیکر قیمت از حالت واحد REST استفاده می‌کند (`/api/market/overview` با کش
+سرور و تازگی ~۶۰ ثانیه) — همان‌طور که در توسعهٔ محلی می‌بینید، همان در
+پروداکشن. هیچ سوکت و سوییچی وجود ندارد.
 
 بقیهٔ متغیرهای `.env` نمونهٔ `.env.example` را ببینید؛ مقادیر `NEXT_PUBLIC_*`
 مهم نیستند چون در زمان build از `.env` خوانده و داخل باندل قرار می‌گیرند، و
@@ -118,7 +112,6 @@ Add → Custom Domain. SSL خودکار فعال می‌شود.
 - [ ] `SESSION_SECRET` جدید و ۳۲+ کاراکتری تنظیم شده (گام ۴)
 - [ ] آدرس خزانه و توکن PENGU با `eth_call` روی RPC راستی‌آزمایی شده
 - [ ] دیتابیس D1 با `schema.sql` ساخته شده (گام ۳)
-- [ ] `NEXT_PUBLIC_TICKER_WS=off` هنگام build فعال بوده (گام ۵)
 - [ ] Cloudflare WAF / Rate Limiting رایگان برای `/api/auth/*` و `/api/payment/*`
       در داشبورد فعال شده (اختیاری اما توصیه‌شده)
 - [ ] لاگ‌ها را در داشبورد → Workers → Observability بررسی کنید

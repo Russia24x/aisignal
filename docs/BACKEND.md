@@ -26,7 +26,6 @@ src/
 │       ├── access/     passes (تعرفه) · entitlements · payments
 │       └── alerts/     checker
 └── app/route.ts        health-check سرویس
-mini-services/ws-ticker/ سرویس socket.io (پورت ۳۰۳۳)
 prisma/schema.prisma    مدل داده
 ```
 
@@ -76,15 +75,15 @@ export async function POST(req: NextRequest) {
 
 ---
 
-## سرویس ws-ticker (mini-service)
+## تیکر قیمت (حالت واحد REST)
 
-- پورت مستقل ۳۰۳۳، socket.io، ورود از مرورگر: `io("/?XTransformPort=3033")` (گیت‌وی Caddy)
-- polling تطبیقی: ۱۵s وقتی کلاینت متصل، ۶۰s idle (صرفه‌جویی ۷۵٪ درخواست)
-- transport: polling-first (درس‌آموخته از محیط sandbox؛ websocket-first باعث reconnect-loop از پشت گیت‌وی می‌شد)
-- **فقط توسعهٔ محلی** — روی Cloudflare Workers اجرا نمی‌شود؛ در پروداکشن
-  `NEXT_PUBLIC_TICKER_WS=off` را تنظیم کنید و LiveTicker به‌طور خودکار از
-  REST با کش ۶۰ ثانیه‌ای (`/api/market/overview`) استفاده می‌کند (بدون
-  Durable Objects و بدون هزینه). مستند در DEPLOYMENT.md
+- LiveTicker مستقیماً از همان snapshot سروری می‌خواند (`useMarket` →
+  `/api/market/overview`، poll ۶۰ ثانیه، TTLCache ۶۰s + stale-while-revalidate)
+- سرویس socket.io قبلی (`mini-services/ws-ticker`) **کاملاً حذف شد** —
+  اجرای سوکت مداوم روی لایهٔ رایگان Cloudflare ممکن نیست و طبق قانون
+  «همه‌چیز رایگان» فقط مسیر سازگار با Workers باقی ماند
+- نتیجه: یک مسیر داده برای محیط توسعه و پروداکشن، بدون زیرساخت اضافه،
+  بدون Durable Objects و بدون هیچ هزینه‌ای. مستند در DEPLOYMENT.md
 
 ## پیکربندی (`.env`)
 

@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Copy, ExternalLink, Globe, Loader2, LogOut, Snowflake, TriangleAlert, Wallet } from "lucide-react";
+import { ChevronDown, Copy, ExternalLink, Globe, Loader2, LogOut, PenLine, Snowflake, TriangleAlert, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { publicConfig } from "@/lib/public-config";
 import { AbstractProfile } from "@/components/abstract/AbstractProfile";
@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 
 export function Header() {
   const { t, locale, setLocale } = useI18n();
-  const { address, entitlements, signingIn, login, signIn, signOut, walletStatus, chainId } = useAuth();
+  const { address, entitlements, signingIn, login, signIn, signOut, walletStatus, chainId, needsSignIn } = useAuth();
   const { data } = useMarket();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -178,8 +178,21 @@ export function Header() {
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <Button onClick={handleSignIn} size="sm" disabled={signingIn} className="gap-2 font-bold">
-            {signingIn ? <Loader2 className="size-4 animate-spin" /> : <Wallet className="size-4" />}
+          <Button
+            onClick={handleSignIn}
+            size="sm"
+            disabled={signingIn}
+            className={cn(
+              "gap-2 font-bold",
+              // Attention state: wallet connected but session not yet created.
+              // A gentle ring + pulse draws the eye to the one required click
+              // (signatures must be click-triggered — popup-blocker safety).
+              needsSignIn &&
+                "ring-2 ring-primary/60 ring-offset-2 ring-offset-background animate-[pulse-glow_2s_ease-in-out_infinite]",
+            )}
+            title={t("wallet.signInDesc")}
+          >
+            {signingIn ? <Loader2 className="size-4 animate-spin" /> : <PenLine className="size-4" />}
             <span className="hidden sm:inline">{signingIn ? t("wallet.signing") : t("wallet.signInTitle")}</span>
           </Button>
         )}

@@ -765,3 +765,78 @@ Stage Summary:
   3) unused template deps (next-auth, sharp, @mdxeditor, framer-motion,
   zustand, uuid, date-fns, @dnd-kit, etc.) left in package.json to avoid
   regression risk — pruning is a safe follow-up if desired
+
+---
+Task ID: 16
+Agent: main
+Task: Free-rule full enforcement + AGW popup-blocking root fix + Abstract professional standards (user request, Persian)
+
+Work Log:
+- SESSION-START-SYNC-CHECK: tree clean, local == origin/main (6cff0ea); cron
+  list = 0 jobs (15-min auto-dev system remains removed)
+- RESEARCH (official docs): read docs.abs.xyz llms.txt index + AGW pages
+  (native-integration, useLoginWithAbstract, AbstractWalletProvider,
+  architecture/FAQ) + official Abstract-Foundation/agw-sdk example
+  "agw-signing-messages" (github). SDK source audit (@privy-io/
+  cross-app-connect + @privy-io/popup): EVERY AGW action (connect/sign/
+  transact) opens a 440×680 window.open popup; window.open→null throws
+  "Failed to initialize request"; browsers only honour window.open inside
+  a user gesture (transient activation ≈5s)
+- ROOT-CAUSE FIX (popup blocking): our auto-signIn useEffect fired
+  signMessageAsync after connect WITHOUT a gesture → popup blocked in
+  Safari/Firefox/often Chrome. Removed the auto-signIn effect entirely —
+  signatures are now click-only (exactly the official example pattern).
+  Header "Sign in with signature" CTA gains needsSignIn attention state
+  (ring-2 + new pulse-glow keyframe in globals.css, PenLine icon,
+  tooltip=signInDesc). Added AGW provider pre-warm on mount
+  (connector.getProvider() for id "xyz.abs.privy") so the auth.privy.io
+  details fetch completes before the user clicks Connect → connect popup
+  opens well inside the activation window
+- FREE-RULE ENFORCEMENT (user: anything not free-rule compliant must be
+  completely removed): deleted mini-services/ws-ticker/ entirely + stale
+  process on :3033 killed; deleted src/hooks/useTicker.ts (socket.io);
+  LiveTicker rewritten to single-mode REST (useMarket only, honest ~60s
+  badge, live dot from REST freshness); NEXT_PUBLIC_TICKER_WS removed
+  from .env/.env.example — one code path for sandbox AND Workers
+- DEP PRUNING (16 packages): @dnd-kit/*, @hookform/resolvers,
+  @mdxeditor/editor, @reactuses/core, @tanstack/react-table, date-fns,
+  framer-motion, next-auth, next-intl, react-markdown,
+  react-syntax-highlighter, sharp, uuid, zustand — all verified
+  zero-references in src/ first; deps 70→54; lint clean, tsc clean
+- DOCS: WALLET-AND-TRANSACTIONS.md (golden rules + new login→session
+  flow diagram + compliance checklist: click-only signatures & pre-warm
+  rows), DEPLOYMENT.md (step 5 = env vars, ticker single-mode note,
+  checklist without TICKER_WS), BACKEND.md, TECH-STACK.md, SECURITY.md,
+  AUDIT.md (ws-ticker issue marked resolved)
+- QA (agent-browser, fresh contexts):
+  * Page loads, zero page errors, zero console errors
+  * Ticker: REST data live ($0.00919, 24H -4.12%, VOL $35.4K, LIQ
+    $448K, FDV $22.21M) + "~60s" badge; network log: ZERO socket.io/
+    engine.io/3033 requests, 7×200 on /api/market/overview
+  * Connect Wallet click → official portal.abs.xyz popup opened with
+    correct params (requester_public_key, provider_app_id, origin,
+    smart_wallet_mode) — popup NOT blocked (pre-warm effective)
+  * Simulated stored-connection state (fake privy-caw localStorage):
+    page reload → "Sign in with signature" CTA with pulse-glow+ring
+    rendered, NO auto-popup attempt (bug gone), console clean
+  * CTA click → signature popup window opened from the gesture (blank
+    URL expected — fake sharedSecret can't build the encrypted request;
+    real connections navigate to portal /cross-app/transact)
+  * FA↔EN language switch (rtl↔ltr) OK; mobile 390px: scrollWidth ==
+    clientWidth (no overflow); footer bottom == body height (natural
+    bottom); desktop screenshot saved (252KB, fully rendered)
+- lint clean, tsc clean, dev.log clean
+
+Stage Summary:
+- User request fully delivered: (1) free rule enforced by removing the
+  only non-free-tier component (ws-ticker socket service) — app is now
+  100% Cloudflare-free compatible with a single REST data path;
+  (2) popup blocking fixed at the ROOT (no gesture-less window.open
+  ever attempted + provider pre-warm) per official AGW docs/example;
+  (3) project aligned with official Abstract standards (documented
+  compliance checklist, official example patterns, 16 unused deps
+  pruned for a clean professional repo)
+- Deploy is simpler than before: no WS toggle, no extra service —
+  npm install → wrangler login → d1 create → schema → secret → deploy
+- Open items: none blocking; wagmi stays on v2 (agw-react peer req),
+  admin panel / Telegram alerts remain roadmap candidates
