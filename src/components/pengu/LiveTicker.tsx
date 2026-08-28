@@ -3,16 +3,18 @@
 /**
  * LiveTicker — thin horizontal marquee bar rendered directly under the Header.
  *
- * Streams the PENGU/USD price over WebSocket (via `useTicker`) and renders
- * price / 24h change / volume / liquidity / fdv with colored ▲/▼ indicators.
- * Falls back to a muted "loading…" state until the first tick arrives.
+ * Streams the PENGU/USD price over the ws-ticker socket (via `useTicker`).
+ * When the socket feed is unavailable (service down / blocked proxy), it
+ * transparently falls back to the REST snapshot from `useMarket`
+ * (same data, ~60s server-cached freshness) so the bar always shows real
+ * numbers instead of a dead "loading…" state.
  *
  * Always LTR — numeric content, regardless of the active i18n locale.
  *
  * @module components/pengu/LiveTicker
  */
 import { useTicker } from "@/hooks/useTicker";
-import { fmt } from "./useMarket";
+import { useMarket, fmt } from "./useMarket";
 import { cn } from "@/lib/utils";
 import { ArrowDown, ArrowUp } from "lucide-react";
 
@@ -47,8 +49,21 @@ function Sep() {
 }
 
 export function LiveTicker() {
-  const { price, change24h, volume24h, liquidityUsd, fdv, fetchedAt, connected } =
-    useTicker();
+  const ticker = useTicker();
+  const market = useMarket();
+
+  // Primary: socket feed (15s freshness). Fallback: REST snapshot (~60s,
+  // server-cached) whenever the socket has not delivered a tick yet.
+  const rest = market.data?.snapshot ?? null;
+  const price = ticker.price ?? rest?.priceUsd ?? null;
+  const change24h = ticker.change24h ?? rest?.change24h ?? null;
+  const volume24h = ticker.volume24h ?? rest?.volume24hUsd ?? null;
+  const liquidityUsd = ticker.liquidityUsd ?? rest?.liquidityUsd ?? null;
+  const fdv = ticker.fdv ?? rest?.fdvUsd ?? null;
+  const fetchedAt = ticker.fetchedAt ?? rest?.fetchedAt ?? null;
+  const connected = ticker.connected;
+  // live = socket feed active; degraded = showing REST fallback data
+  const live = ticker.connected || ticker.price !== null;
 
   const hasData = price !== null;
   const positive = (change24h ?? 0) >= 0;
@@ -59,19 +74,19 @@ export function LiveTicker() {
       className="border-b border-border/50 bg-card/40 backdrop-blur-xl text-xs font-mono"
     >
       <div className="mx-auto flex h-9 max-w-6xl items-center gap-3 overflow-x-auto px-4 whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {/* Label + green pulsing dot */}
+        {/* Label + status dot */}
         <div className="flex shrink-0 items-center gap-2 text-muted-foreground">
           <span className="relative grid place-items-center">
             <span
               className={cn(
                 "absolute inline-flex size-full animate-ping rounded-full opacity-60",
-                connected ? "bg-buy" : "bg-muted-foreground/40",
+                live ? "bg-buy" : "bg-muted-foreground/40",
               )}
             />
             <span
               className={cn(
                 "relative inline-flex size-1.5 rounded-full pulse-ring",
-                connected ? "bg-buy" : "bg-muted-foreground/50",
+                live ? "bg-buy" : "bg-muted-foreground/50",
               )}
             />
           </span>
@@ -111,9 +126,12 @@ export function LiveTicker() {
           <span className="shrink-0 text-muted-foreground/60">loading…</span>
         )}
 
-        {!connected && hasData && (
-          <span className="ms-auto shrink-0 text-muted-foreground/50">
-            reconnecting…
+        {!live && hasData && (
+          <span
+            className="ms-auto shrink-0 text-muted-foreground/50"
+            title="Live socket unavailable — showing 60s cached data"
+          >
+            ~60s
           </span>
         )}
       </div>

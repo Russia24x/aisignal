@@ -177,8 +177,16 @@ function shutdown(signal: string) {
   console.log(`[ws-ticker] ${signal} received, shutting down...`);
   if (fetchTimer) clearTimeout(fetchTimer);
   clearInterval(heartbeatTimer);
+  // Hard-exit after a short grace period: httpServer.close() waits for all
+  // connections to drain, which may never happen with lingering sockets —
+  // that turns a graceful shutdown into an immortal zombie holding the port.
+  const hardExit = setTimeout(() => process.exit(0), 2_000);
+  hardExit.unref?.();
   io.close();
-  httpServer.close(() => process.exit(0));
+  httpServer.close(() => {
+    clearTimeout(hardExit);
+    process.exit(0);
+  });
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));

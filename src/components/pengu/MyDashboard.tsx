@@ -21,6 +21,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useI18n, type Locale } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
+import { useAbstractProfile } from "@/hooks/useAbstractProfile";
+import { getTierColor } from "@/lib/abstract/profile";
+import { AbstractProfile } from "@/components/abstract/AbstractProfile";
 import { publicConfig } from "@/lib/public-config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +42,7 @@ import {
   ExternalLink,
   History,
   Loader2,
+  Medal,
   RefreshCw,
   Sparkles,
   Wallet,
@@ -172,6 +176,9 @@ export function MyDashboard() {
     retry: 1,
   });
 
+  const profileQuery = useAbstractProfile();
+  const portalProfile = profileQuery.data ?? null;
+
   // hard gate: render nothing for visitors / connected-but-not-paid users
   if (!enabled || authLoading) return null;
 
@@ -231,6 +238,14 @@ export function MyDashboard() {
           </div>
         </header>
 
+        {/* Abstract Portal identity banner */}
+        <PortalIdentity
+          address={address as `0x${string}` | null}
+          profile={portalProfile}
+          loading={profileQuery.isLoading}
+          t={t}
+        />
+
         {/* 4-card grid */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <SubscriptionCard
@@ -261,6 +276,108 @@ export function MyDashboard() {
 /* --------------------------- cards --------------------------- */
 
 type TFunc = (key: string) => string;
+
+/**
+ * Abstract Portal identity banner — avatar with tier ring, display name,
+ * tier badge, badge count and a deep-link to the public Portal profile.
+ * Gracefully degrades when the wallet has no Portal profile yet.
+ */
+function PortalIdentity({
+  address,
+  profile,
+  loading,
+  t,
+}: {
+  address: `0x${string}` | null;
+  profile: import("@/lib/abstract/profile").AbstractProfileData | null;
+  loading: boolean;
+  t: TFunc;
+}) {
+  if (!address) return null;
+
+  const tierNameKey = `dashboard.tier.${profile?.tier ?? 1}`;
+  const tierName = t(tierNameKey) !== tierNameKey ? t(tierNameKey) : t("dashboard.tier.1");
+  const tierColor = getTierColor(profile?.tier ?? 1);
+  const displayName =
+    profile?.name || `${address.slice(0, 6)}…${address.slice(-4)}`;
+
+  return (
+    <div className="glass-card mb-4 flex flex-wrap items-center gap-4 p-4 sm:gap-5">
+      <AbstractProfile address={address} size="lg" showTooltip={false} />
+
+      <div className="min-w-0 flex-1">
+        {loading ? (
+          <Skeleton className="mb-1.5 h-5 w-32" />
+        ) : (
+          <p className="truncate text-sm font-black sm:text-base">{displayName}</p>
+        )}
+        <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span>{t("dashboard.portalIdentity")}</span>
+          {profile ? (
+            <Badge
+              variant="outline"
+              className="gap-1 border-transparent px-1.5 font-bold"
+              style={{ color: tierColor, background: `${tierColor}1a` }}
+            >
+              <Medal className="size-3" />
+              {tierName}
+            </Badge>
+          ) : loading ? null : (
+            <span className="opacity-70">{t("dashboard.noPortalProfile")}</span>
+          )}
+        </p>
+      </div>
+
+      {profile && profile.badges.length > 0 && (
+        <TooltipProvider delayDuration={200}>
+          <div className="flex items-center gap-1.5" dir="ltr">
+            {profile.badges.slice(0, 5).map((b) => (
+              <Tooltip key={b.id}>
+                <TooltipTrigger asChild>
+                  <span
+                    className="grid size-8 place-items-center overflow-hidden rounded-full bg-muted/60 ring-1 ring-border/60 transition-transform hover:scale-110"
+                    role="img"
+                    aria-label={b.name}
+                  >
+                    {b.icon ? (
+                      <img src={b.icon} alt={b.name} className="size-full object-cover" loading="lazy" />
+                    ) : (
+                      <Medal className="size-3.5 text-muted-foreground" />
+                    )}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  <p className="font-medium">{b.name}</p>
+                </TooltipContent>
+              </Tooltip>
+            ))}
+            {profile.badgeCount > profile.badges.length && (
+              <Badge variant="secondary" className="font-mono text-[10px]">
+                +{profile.badgeCount - profile.badges.length}
+              </Badge>
+            )}
+          </div>
+        </TooltipProvider>
+      )}
+
+      <Button
+        asChild
+        size="sm"
+        variant="ghost"
+        className="gap-1.5 text-muted-foreground"
+      >
+        <a
+          href={`https://abs.xyz/profile/${address}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <ExternalLink className="size-3.5" />
+          <span className="hidden sm:inline">{t("dashboard.viewOnPortal")}</span>
+        </a>
+      </Button>
+    </div>
+  );
+}
 
 function CardShell({
   icon,

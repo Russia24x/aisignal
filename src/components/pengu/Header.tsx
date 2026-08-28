@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown, Globe, Loader2, LogOut, Snowflake, Wallet } from "lucide-react";
+import { AbstractProfile } from "@/components/abstract/AbstractProfile";
 import { cn } from "@/lib/utils";
 
 export function Header() {
@@ -93,7 +94,7 @@ export function Header() {
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger asChild>
               <Button variant="secondary" size="sm" className="gap-2 font-mono">
-                <span className="size-2 rounded-full bg-buy" />
+                <AbstractProfile address={address} size="sm" showTooltip={false} className="-my-1" />
                 {short(address!)}
                 <ChevronDown className="size-3.5 opacity-60" />
               </Button>

@@ -205,7 +205,15 @@
     "noPayments": "No payments yet",
     "notAvailable": "—",
     "refresh": "Refresh",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "portalIdentity": "Abstract Portal identity",
+    "noPortalProfile": "No Portal profile yet — create one at abs.xyz",
+    "viewOnPortal": "View on Portal",
+    "tier.1": "Bronze",
+    "tier.2": "Silver",
+    "tier.3": "Gold",
+    "tier.4": "Platinum",
+    "tier.5": "Diamond"
   },
   "alerts": {
     "title": "Price Alerts",

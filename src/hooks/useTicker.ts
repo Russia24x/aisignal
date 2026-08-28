@@ -72,8 +72,14 @@ export function useTicker(): UseTickerResult {
         if (cancelled || typeof window === "undefined" || typeof io !== "function") return;
 
         // MANDATORY: path `/` + XTransformPort=3033 (never a direct localhost URL)
+        // Transport: polling-only. The sandbox gateway (Caddy) does not
+        // reliably pass WebSocket upgrades on this route, and a failed upgrade
+        // tears the connection down into a reconnect loop. socket.io long-
+        // polling is more than enough for a 15s price feed and keeps the
+        // connection stable behind any proxy.
         socket = io("/?XTransformPort=3033", {
-          transports: ["websocket", "polling"],
+          transports: ["polling"],
+          upgrade: false,
           reconnection: true,
           reconnectionAttempts: Infinity,
           reconnectionDelay: 1_000,

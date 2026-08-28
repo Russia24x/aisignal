@@ -205,7 +205,15 @@
     "noPayments": "هنوز پرداختی ثبت نشده",
     "notAvailable": "—",
     "refresh": "به‌روزرسانی",
-    "loading": "در حال بارگذاری…"
+    "loading": "در حال بارگذاری…",
+    "portalIdentity": "هویت Abstract Portal",
+    "noPortalProfile": "هنوز پروفایل Portal ندارید — در abs.xyz بسازید",
+    "viewOnPortal": "مشاهده در Portal",
+    "tier.1": "برنز",
+    "tier.2": "نقره",
+    "tier.3": "طلا",
+    "tier.4": "پلاتین",
+    "tier.5": "الماس"
   },
   "alerts": {
     "title": "هشدار قیمتی",
