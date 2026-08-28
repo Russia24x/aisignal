@@ -219,3 +219,34 @@ Stage Summary - Dev server status:
 - ws-ticker mini-service (port 3033) restarted with setsid nohup, HTTP 200 confirmed
 - All code is lint-clean + TS-clean and ready to render once dev server restarts
 - System watchdog may need time to detect and restart the Next.js dev server
+
+---
+Task ID: 6
+Agent: main
+Task: GitHub upload + RULES.md (NEVER-FORCE-PUSH, SESSION-START-SYNC-CHECK) + security cleanup
+
+Work Log:
+- SESSION-START-SYNC-CHECK executed: git fetch origin + git status + git ls-remote
+  - Result: GitHub repo Russia24x/aisignal is COMPLETELY EMPTY (0 commits, 0 branches)
+  - Local main: clean working tree, 3 commits (adef3d4 → fe41305 → a08b9c8)
+  - NOT behind/diverged (remote empty) → safe to proceed; push will be pure fast-forward
+  - NOTE: no "soft-lock fix" commit exists on GitHub — repo is brand new
+- SECURITY: discovered .env (real SESSION_SECRET) and db/custom.db (real user/payment data)
+  were TRACKED in git (gitignore rules added after initial tracking)
+  - git rm --cached: .env, db/custom.db, download/*, tool-results/*, agent-ctx/*, .zscripts/dev.pid
+  - .gitignore hardened: /db/*.db, /download/, /tool-results/, /agent-ctx/, .zscripts/*.pid, !.env.example
+  - Force-verified: staged .env.example contains ONLY placeholder secrets (dev-only-secret-change-me-…)
+  - Local .env + db/custom.db untouched on disk — app keeps working
+- Verified no PAT token / SESSION_SECRET leak in any tracked file (git grep)
+- Created RULES.md with the two mandatory rules:
+  1. NEVER-FORCE-PUSH (no --force / -f / --force-with-lease ever; rejected push → STOP + report + wait)
+  2. SESSION-START-SYNC-CHECK (every session start & after any time gap: fetch + status;
+     behind/diverged → STOP immediately; clean → continue)
+  - RULES.md does NOT contain the GitHub PAT (repo URL only, token lives in .git/config)
+- Remote origin configured with provided PAT credentials
+- Committed and pushed (normal push, NO force) to github.com/Russia24x/aisignal main
+
+Stage Summary:
+- Remote: https://github.com/Russia24x/aisignal (main)
+- Sync protocol now enforced via RULES.md for all future sessions
+- Sensitive data excluded from the repository permanently
