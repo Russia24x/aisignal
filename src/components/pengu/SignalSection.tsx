@@ -21,6 +21,7 @@ import { useAuth } from "./useAuth";
 import { useMarket, fmt } from "./useMarket";
 import { authFetch } from "@/lib/client-session";
 import { PaymentDialog, type PaymentProduct } from "./PaymentDialog";
+import { FactorList } from "./FactorList";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -74,20 +75,6 @@ interface PreviewData {
   dataQuality: number;
   candlesUsed: number;
 }
-
-const FACTOR_LABELS: Record<string, { fa: string; en: string }> = {
-  emaTrend: { fa: "روند EMA (9/21)", en: "EMA trend (9/21)" },
-  smaStructure: { fa: "ساختار SMA (20/50)", en: "SMA structure (20/50)" },
-  rsi: { fa: "RSI (14)", en: "RSI (14)" },
-  macd: { fa: "MACD (12/26/9)", en: "MACD (12/26/9)" },
-  bollinger: { fa: "باندهای بولینگر", en: "Bollinger Bands" },
-  stochastic: { fa: "استوکاستیک (14/3)", en: "Stochastic (14/3)" },
-  obv: { fa: "جریان حجم (OBV)", en: "Volume flow (OBV)" },
-  vwap: { fa: "VWAP", en: "VWAP" },
-  momentum: { fa: "مومنتوم و شیب", en: "Momentum & slope" },
-  volume: { fa: "رژیم حجم", en: "Volume regime" },
-  srLevels: { fa: "حمایت/مقاومت", en: "Support/Resistance" },
-};
 
 export function SignalSection() {
   const { t, locale } = useI18n();
@@ -385,50 +372,7 @@ function FullSignalCard({ signal, locale }: { signal: FullSignal; locale: string
             <Target className="size-4 text-primary" />
             {t("signal.factors")}
           </h3>
-          <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pe-1 nice-scroll">
-            {signal.factors
-              .slice()
-              .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution))
-              .map((f) => {
-                const label = FACTOR_LABELS[f.key]?.[locale === "fa" ? "fa" : "en"] ?? f.key;
-                const pct = Math.min(100, Math.abs(f.score) * 100);
-                const pos = f.score >= 0;
-                return (
-                  <Tooltip key={f.key}>
-                    <TooltipTrigger asChild>
-                      <div className="flex items-center gap-3 rounded-lg border border-border/40 bg-muted/20 px-3 py-2">
-                        <span className="w-32 shrink-0 truncate text-xs font-semibold sm:w-40">{label}</span>
-                        <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted" dir="ltr">
-                          <div className="absolute left-1/2 top-0 h-full w-px bg-border" />
-                          <div
-                            className={cn("absolute top-0 h-full", pos ? "bg-buy" : "bg-sell")}
-                            style={
-                              pos
-                                ? { left: "50%", width: `${pct / 2}%` }
-                                : { right: "50%", width: `${pct / 2}%` }
-                            }
-                          />
-                        </div>
-                        <span
-                          className={cn(
-                            "w-14 shrink-0 text-left font-mono text-[11px] font-bold",
-                            pos ? "text-buy" : "text-sell",
-                          )}
-                          dir="ltr"
-                        >
-                          {f.score >= 0 ? "+" : ""}
-                          {f.score.toFixed(2)}
-                        </span>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs">
-                      {t("signal.weight")}: {f.weight} · contribution: {f.contribution >= 0 ? "+" : ""}
-                      {f.contribution.toFixed(1)}
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })}
-          </div>
+          <FactorList factors={signal.factors} className="mt-3 max-h-72 overflow-y-auto pe-1 nice-scroll" />
 
           <h3 className="mt-5 flex items-center gap-2 text-sm font-bold">
             <Brain className="size-4 text-primary" />

@@ -1452,3 +1452,82 @@ Stage Summary:
   accumulate (TrackRecord fills itself); email/Telegram notification
   delivery for price alerts (needs outbound channel decision); consider
   a "platform pulse" stats strip once payment count grows beyond 1
+
+---
+Task ID: 25
+Agent: main
+Task: Scheduled assessment round — QA passed clean → delivered the "Signal Insight & Transparency" package: per-day signal detail dialog (public drill-down), shared FactorList with per-indicator education tooltips, and a "what-if" P&L simulator on the equity curve
+
+Work Log:
+- SESSION-START-SYNC-CHECK (per RULES.md): tree clean, local == origin/main
+  (8b091a9), no cron jobs, no force push
+- STATUS ASSESSMENT first: dev server 200, /api health ok, /api/agw/details
+  200 (cache), dev.log zero errors; ws-ticker mini-service correctly ABSENT
+  (removed in Task 16 for free-tier compliance — LiveTicker is REST-only);
+  fresh-browser QA: 0 page errors, 0 console errors, 9 sections, footer at
+  natural bottom, mobile 390px zero overflow; VLM full-page 8.5/10 → phase
+  judged stable → feature round (per this round's explicit mandate)
+- FORENSIC NOTE for future QA: `agent-browser errors` on a LONG-LIVED dev
+  browser shows stale Turbopack HMR errors ("detailsCache/StatCard is not
+  defined", "useAuth must be inside AuthProvider") that do NOT exist in a
+  fresh browser — always restart the browser before trusting error counts
+- NEW /api/signal/detail?day=YYYY-MM-DD (public, rate-limited, 5min cache):
+  full stored EngineOutput for one PAST day (factors, all 8 risk levels,
+  bilingual reasoning, outcome + price change). Paywall intact: today or
+  future day → 403 TODAY_PAYWALLED, malformed → 400, unknown → 404 (all
+  four paths curl-verified). signal-service.getSignalDetail() rejects
+  day >= today BEFORE any DB read — same leak-proof rule as history
+- NEW FactorList.tsx — the factor breakdown extracted from SignalSection
+  into a shared component; each of the 11 indicator rows now carries an
+  education tooltip (what RSI/MACD/OBV… actually measure, fa+en) + the
+  existing weight/contribution line; row hover affordance added.
+  SignalSection's live card and the new dialog render the identical list
+- NEW SignalDetailDialog.tsx — opens from any track-record row click:
+  day header + Action/Outcome badges, action-colored accent strip
+  (matches the live signal card), composite score + confidence gauge,
+  outcome strip (signal price → evaluation price + Δ% in outcome color),
+  8-level grid, FactorList, localized reasoning, disclaimer; lazy-fetch
+  with per-day in-memory cache, skeletons, error state; RTL/LTR aware;
+  mobile 390px full-width with proper margins (VLM 9/10)
+- TrackRecord upgrades:
+  * rows clickable (cursor-pointer, hover:bg-primary/5, focus-visible
+    ring, RTL/LTR-aware chevron affordance column) + footer hint
+    "برای دیدن تحلیل کامل هر روز، روی ردیف آن کلیک کنید"
+  * P&L simulator under the equity curve: "اگر سیگنال‌ها را دنبال
+    می‌کردید…" — presets 10/50/100/500 + free numeric input → final
+    value + profit pill computed live from the real cumulative curve
+    (100 PENGU → 106.04 on the seeded +6.04% curve, math verified);
+    hidden when no curve exists (honest empty state)
+  * fixed REAL defect found by VLM + DOM measurement: last table row
+    was half-cut at rest (container 384px vs 586px content) → non-
+    paginated cap raised to 40rem (fits typical lists fully, measured
+    0 clipped rows) + scroll-snap on rows for the paginated case
+- i18n: +11 factor-hint keys (signal.factorHint.*) + 10 track keys
+  (detail/dialog/simulator) in BOTH fa.json and en.json
+- QA with 14 seeded past-day signals (real today-engine output + pseudo-
+  random walk), then FULL CLEANUP: seeds deleted (DB back to the single
+  real OPEN signal 2026-08-28), seed scripts removed, browser storage
+  cleared — test artifacts never reach GitHub
+- VERIFIED: FA + EN locales (dialog copy, hints, simulator all localized),
+  RTL/LTR chevron rotation, dialog open/close/reopen with cached day,
+  education tooltips (hover EMA → fa hint + weight), presets recompute
+  (500 → 530.2 +30.2), detail API 200/400/403/404, empty state after
+  cleanup, fresh-browser 0 page errors, mobile 390px zero overflow +
+  footer at natural bottom, lint clean, tsc clean
+- Dev-server note: server was OOM-reaped mid-round (documented sandbox
+  quirk) — restarted with the (setsid nohup … &) pattern, recovered
+
+Stage Summary:
+- The track record is no longer a flat table: every past signal day is
+  now a fully transparent, auditable breakdown (all 11 indicators with
+  plain-language education, every risk level, the reasoning, and the
+  real outcome) — one click from the public history
+- The simulator turns the equity curve into a personal what-if ("your
+  stake → your final value") — a conversion driver built entirely from
+  already-public data
+- Content-gating unchanged and re-verified: today's signal still never
+  leaves the paid endpoint (403), only past days are public
+- Next-phase candidates: per-factor sparkline history (needs days of
+  stored signals to accumulate), curve tooltip with day jump-link to
+  the detail dialog, optional email/Telegram alert delivery (needs an
+  outbound-channel decision from the owner)

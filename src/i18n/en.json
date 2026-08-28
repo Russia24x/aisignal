@@ -66,7 +66,20 @@
     "daysLeft": "days left",
     "needPass": "Today's signal is locked",
     "needPassDesc": "Registration is free; buy an access pass to unlock the daily signals.",
-    "viewPlans": "View all plans"
+    "viewPlans": "View all plans",
+    "factorHint": {
+      "emaTrend": "9/21-day exponential moving averages — the short-term trend. Positive = uptrend.",
+      "smaStructure": "20/50-day simple moving averages — the medium-term trend structure.",
+      "rsi": "Relative Strength Index — above 70 is overbought, below 30 oversold.",
+      "macd": "Moving-average convergence/divergence — histogram & signal line show momentum.",
+      "bollinger": "Bollinger Bands — volatility squeeze or expansion around the 20-day mean.",
+      "stochastic": "Stochastic oscillator — where price sits in its recent range; 80/20 mark saturated zones.",
+      "obv": "On-balance volume — confirms the trend via money flowing in and out.",
+      "vwap": "Volume-weighted average price — the institutional fair-value reference.",
+      "momentum": "Price momentum & slope — the speed and direction of the recent move.",
+      "volume": "Volume regime — trades vs their average; expansion confirms the move.",
+      "srLevels": "Support & resistance — key levels where price previously reacted."
+    }
   },
   "payment": {
     "title": "Pay with PENGU",
@@ -165,7 +178,17 @@
     "loadingMore": "Loading…",
     "curve": "Cumulative strategy return",
     "curveHint": "Sum of evaluated signal returns (BUY: +Δ%, SELL: −Δ%)",
-    "curveEmpty": "The cumulative return chart appears after the first evaluation (24h after each signal)"
+    "curveEmpty": "The cumulative return chart appears after the first evaluation (24h after each signal)",
+    "detailTitle": "Signal detail",
+    "detailHint": "Click any row to see that day's full breakdown",
+    "loadingDetail": "Loading detail…",
+    "detailError": "Signal detail unavailable.",
+    "outcomePrice": "Evaluation price",
+    "priceMove": "Price move",
+    "simTitle": "If you had followed the signals…",
+    "simAmount": "Stake per signal",
+    "simFinal": "Final value",
+    "simNote": "Simple math on the cumulative curve — fees & slippage not included."
   },
   "engine": {
     "title": "Inside the Analysis Engine",

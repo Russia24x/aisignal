@@ -13,17 +13,20 @@
  *  - WinRateRing: animated circular progress for the win rate
  *  - EquityCurve: cumulative strategy-return sparkline (SVG area chart,
  *    zero baseline, gradient fill, end-point marker)
+ *  - P&L simulator: "stake X PENGU per signal" → final value from the curve
+ *  - rows are clickable → SignalDetailDialog (full per-day breakdown)
  *
  * @module components/pengu/TrackRecord
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { fmt } from "./useMarket";
+import { SignalDetailDialog } from "./SignalDetailDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { History, Loader2, TrendingUp, Trophy } from "lucide-react";
+import { Calculator, ChevronLeft, History, Loader2, MousePointerClick, TrendingUp, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 30;
@@ -60,6 +63,7 @@ export function TrackRecord() {
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
+  const [detailDay, setDetailDay] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/signal/history?limit=${PAGE_SIZE}`, { cache: "no-store" })
@@ -162,6 +166,9 @@ export function TrackRecord() {
               </div>
             </div>
 
+            {/* P&L simulator — "stake X per signal" from the real curve */}
+            {hasCurve && <PnlSimulator curve={curve!} />}
+
             {/* stat cards */}
             <div className="mt-5 grid grid-cols-3 gap-3 border-t border-border/50 pt-4">
               <StatCard label={t("track.closedSignals")} value={String(stats.closed)} />
@@ -189,9 +196,16 @@ export function TrackRecord() {
             </div>
           ) : (
             <>
-              <div className={cn("nice-scroll", hasMore ? "max-h-[28rem]" : "max-h-96", "overflow-y-auto")}>
+              <div
+                className={cn(
+                  "nice-scroll snap-y snap-proximity overflow-y-auto",
+                  // paginated → compact 28rem scroll area; single page → taller
+                  // 40rem cap so typical lists render without a half-cut row
+                  hasMore ? "max-h-[28rem]" : "max-h-[40rem]",
+                )}
+              >
                 <Table>
-                  <TableHeader className="sticky top-0 bg-popover/95 backdrop-blur">
+                  <TableHeader className="sticky top-0 z-10 bg-popover/95 backdrop-blur">
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="text-xs">{t("track.day")}</TableHead>
                       <TableHead className="text-xs">{t("track.action")}</TableHead>
@@ -199,11 +213,16 @@ export function TrackRecord() {
                       <TableHead className="text-xs">{t("track.priceAtSignal")}</TableHead>
                       <TableHead className="text-xs">{t("track.change")}</TableHead>
                       <TableHead className="text-xs">{t("track.outcome")}</TableHead>
+                      <TableHead className="w-8" aria-label={t("track.detailTitle")} />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {items.map((it) => (
-                      <TableRow key={it.day} className="text-xs">
+                      <TableRow
+                        key={it.day}
+                        onClick={() => setDetailDay(it.day)}
+                        className="cursor-pointer snap-start text-xs transition-colors hover:bg-primary/5 focus-visible:bg-primary/10 focus-visible:outline-none"
+                      >
                         <TableCell className="font-mono font-semibold">{it.day}</TableCell>
                         <TableCell>
                           <ActionBadge action={it.action} />
@@ -224,6 +243,12 @@ export function TrackRecord() {
                         <TableCell>
                           <OutcomeBadge outcome={it.outcome} />
                         </TableCell>
+                        <TableCell>
+                          <ChevronLeft
+                            className="size-3.5 text-muted-foreground/50 rtl:rotate-0 ltr:rotate-180"
+                            aria-hidden
+                          />
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -232,6 +257,10 @@ export function TrackRecord() {
 
               {/* pagination footer */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 bg-card/30 px-4 py-3">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                  <MousePointerClick className="size-3.5" />
+                  {t("track.detailHint")}
+                </span>
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
                   <History className="size-3.5" />
                   {t("track.showing", { shown: String(items.length), total: String(total) })}
@@ -261,6 +290,8 @@ export function TrackRecord() {
           <p className="mt-3 text-center text-xs text-muted-foreground">{t("common.error")}</p>
         )}
       </div>
+
+      <SignalDetailDialog day={detailDay} onClose={() => setDetailDay(null)} />
     </section>
   );
 }
@@ -387,6 +418,87 @@ function EquityCurve({ points }: { points: CurvePoint[] }) {
         <circle cx={path.lastX} cy={path.lastY} r="3.4" fill={stroke} />
         <circle cx={path.lastX} cy={path.lastY} r="6.5" fill={stroke} opacity="0.25" />
       </svg>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* PnlSimulator — "if you had staked X PENGU on every signal"          */
+/* ------------------------------------------------------------------ */
+
+const SIM_PRESETS = [10, 50, 100, 500];
+
+function PnlSimulator({ curve }: { curve: CurvePoint[] }) {
+  const { t } = useI18n();
+  const [amount, setAmount] = useState(100);
+
+  const { finalValue, profit } = useMemo(() => {
+    const cum = curve[curve.length - 1].cum;
+    const final = amount * (1 + cum / 100);
+    return { finalValue: Math.round(final * 100) / 100, profit: Math.round((final - amount) * 100) / 100 };
+  }, [curve, amount]);
+
+  const positive = profit >= 0;
+
+  return (
+    <div className="mt-4 rounded-xl border border-primary/25 bg-primary/5 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold">
+          <Calculator className="size-3.5 text-primary" />
+          {t("track.simTitle")}
+        </span>
+        <div className="flex items-center gap-1.5" dir="ltr">
+          {SIM_PRESETS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setAmount(p)}
+              className={cn(
+                "rounded-full px-2.5 py-0.5 font-mono text-[11px] font-bold ring-1 transition-all",
+                amount === p
+                  ? "bg-primary/20 text-primary ring-primary/50"
+                  : "text-muted-foreground ring-border/60 hover:bg-muted/50 hover:text-foreground",
+              )}
+            >
+              {p}
+            </button>
+          ))}
+          <input
+            type="number"
+            min={1}
+            max={1000000}
+            value={amount}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setAmount(Number.isFinite(v) && v > 0 ? Math.min(v, 1000000) : 1);
+            }}
+            aria-label={t("track.simAmount")}
+            className="w-24 rounded-lg border border-border/60 bg-background/60 px-2.5 py-1 font-mono text-xs font-bold tabular-nums outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
+            dir="ltr"
+          />
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
+        <div className="text-[11px] text-muted-foreground">
+          {t("track.simAmount")}: <span className="font-mono font-bold text-foreground" dir="ltr">{amount.toLocaleString("en-US")} PENGU</span>
+        </div>
+        <div className="text-left" dir="ltr">
+          <span className="text-[10px] text-muted-foreground">{t("track.simFinal")}</span>
+          <div className="flex items-baseline gap-2 font-mono">
+            <span className="text-xl font-black tabular-nums">{finalValue.toLocaleString("en-US")}</span>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-black ring-1",
+                positive ? "bg-buy/10 text-buy ring-buy/30" : "bg-sell/10 text-sell ring-sell/30",
+              )}
+            >
+              {positive ? "+" : ""}
+              {profit.toLocaleString("en-US")} PENGU
+            </span>
+          </div>
+        </div>
+      </div>
+      <p className="mt-2 text-[10px] text-muted-foreground/70">{t("track.simNote")}</p>
     </div>
   );
 }

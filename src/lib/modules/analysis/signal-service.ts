@@ -118,6 +118,82 @@ export async function evaluateOpenSignals(): Promise<number> {
   return updated;
 }
 
+/** Detail payload for one PAST day's signal (public track-record drill-down).
+ *  Same paywall rule as the history: today's signal never leaves the paid
+ *  endpoint — a `day >= today` request is rejected before any DB read. */
+export interface SignalDetail {
+  day: string;
+  action: string;
+  score: number;
+  confidence: number;
+  dataQuality: number;
+  price: number;
+  entryLow: number | null;
+  entryHigh: number | null;
+  stopLoss: number | null;
+  takeProfit1: number | null;
+  takeProfit2: number | null;
+  riskReward: number | null;
+  expectedRangeLow: number | null;
+  expectedRangeHigh: number | null;
+  support: number | null;
+  resistance: number | null;
+  atr: number | null;
+  factors: EngineOutput["factors"];
+  reasoning: { fa: string; en: string };
+  candlesUsed: number;
+  outcome: string;
+  outcomePrice: number | null;
+  priceChangePct: number | null;
+  generatedAt: string;
+}
+
+export async function getSignalDetail(day: string): Promise<
+  { ok: true; signal: SignalDetail } | { ok: false; code: "TODAY_PAYWALLED" | "NOT_FOUND" }
+> {
+  const today = todayKey();
+  if (day >= today) return { ok: false, code: "TODAY_PAYWALLED" };
+
+  const row = await db.signal.findUnique({ where: { day } });
+  if (!row) return { ok: false, code: "NOT_FOUND" };
+
+  const engine = JSON.parse(row.indicatorsJson) as EngineOutput;
+  const change =
+    row.outcomePrice !== null && row.price > 0
+      ? Math.round(((row.outcomePrice - row.price) / row.price) * 10000) / 100
+      : null;
+
+  return {
+    ok: true,
+    signal: {
+      day: row.day,
+      action: row.action,
+      score: row.score,
+      confidence: row.confidence,
+      dataQuality: row.dataQuality,
+      price: row.price,
+      entryLow: row.entryLow,
+      entryHigh: row.entryHigh,
+      stopLoss: row.stopLoss,
+      takeProfit1: row.takeProfit1,
+      takeProfit2: row.takeProfit2,
+      riskReward: engine.riskReward ?? null,
+      expectedRangeLow: engine.expectedRangeLow ?? null,
+      expectedRangeHigh: engine.expectedRangeHigh ?? null,
+      support: engine.support ?? null,
+      resistance: engine.resistance ?? null,
+      atr: engine.atr ?? null,
+      factors: engine.factors ?? [],
+      reasoning: engine.reasoning ?? { fa: "", en: "" },
+      candlesUsed: engine.candlesUsed ?? 0,
+      outcome: row.outcome,
+      outcomePrice: row.outcomePrice,
+      priceChangePct: change,
+      generatedAt: row.generatedAt.toISOString(),
+    },
+  };
+}
+
 /** Public track record (no auth) — proves the engine's real performance.
  *  NEVER includes today's signal: the current day's action is the paid
  *  product and must not leak through the free track record.
