@@ -331,3 +331,40 @@ Stage Summary:
 - Local == origin/main == fcddcb6 — single source of truth established
 - All 3 user requests fulfilled: upload ✅, RULES.md (both rules) ✅, sync check ✅
 - Next phase can start from a fully synced, verified baseline
+
+---
+Task ID: 9
+Agent: main
+Task: Full technical audit — rate limits, free-tier resource usage, over-engineering & reality check
+
+Work Log:
+- Audited rate limiting: all 14 API routes guarded (auth 10/min, payment 10/min, signal 30/min, public 60/min per IP);
+  in-memory sliding window with 10k-entry memory bound + cleanup; IP extraction cf-connecting-ip → x-forwarded-for → x-real-ip
+- Measured external API call rates:
+  - ws-ticker: was fixed 15s poll = 240 DexScreener req/hr 24/7 regardless of viewers
+  - market service: DexScreener ≤60/hr (60s TTL), CoinGecko cross-check ≤60/hr, Binance 4/hr (15min TTL)
+  - frontend: Header useMarket polls our cached API every 60s (no direct upstream calls), LiveTicker is WS push (0 HTTP)
+- Audited caching: TTLCache stale-while-revalidate, on-demand only (zero traffic = zero upstream calls from Next.js app)
+- Audited DB load: 1 signal/2 users/0 alerts/1 payment; writes ~few/day + auth nonces; far below D1 free limits (100k writes/day)
+- Audited dependencies: 69 deps, ~14 unused in src/ (next-auth, next-intl, zustand, mdxeditor, dnd-kit, etc.) — all template
+  bloat, not our choices; unused ones don't ship in client bundle (not imported from any route). Decision: leave, documented.
+- OVER-ENGINEERING VERDICTS (honest):
+  - 3-provider fallback: JUSTIFIED (core product reliability, free APIs)
+  - 11-indicator engine: JUSTIFIED (it IS the product, computed once/day, stored in DB)
+  - ws-ticker mini-service: works in sandbox but does NOT map to Cloudflare Workers free deployment
+    (would need Durable Objects); kept as demo feature, documented migration options
+  - CoinGecko cross-check per refresh: UNNECESSARY → throttled
+  - Full shadcn template dep set: template bloat, harmless in production bundles, not worth churn
+- IMPLEMENTED 2 surgical fixes (low-risk, direct resource savings):
+  1. ws-ticker adaptive polling: 15s when clients connected, 60s when idle (240→60 req/hr idle, -75%)
+  2. CoinGecko cross-check throttle: every 10th snapshot cache miss (≤60→≤6 calls/hr)
+- Verified: lint clean, ws-ticker handshake OK after hot reload, market overview 200, homepage 200
+- SESSION-START-SYNC-CHECK before commit: clean, up to date with origin/main
+- Committed 82e72ae + pushed (normal push, NO force) — verified in sync
+
+Stage Summary:
+- External API usage per hour with 0 users: DexScreener 240→60, CoinGecko 60→6, Binance 4 (unchanged)
+- With 1 active viewer: DexScreener ≤240 (60 app + 240 ws when connected), all far below free limits
+  (DexScreener 300 req/MIN, CoinGecko demo ~10-30 req/min, Binance 1200 weight/min)
+- Honest assessment recorded: what's real (working product, real payments, real engine) vs what's demo-only
+  (ws-ticker architecture is sandbox-specific; deployment target needs different transport)
