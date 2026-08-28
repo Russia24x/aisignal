@@ -20,6 +20,7 @@ import {
   Eye,
   Gem,
   Loader2,
+  PenLine,
   Sparkles,
   Ticket,
   TrendingDown,
@@ -27,7 +28,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   ACCESS_PASSES,
@@ -52,6 +53,25 @@ export function PricingSection() {
   const activeProduct = entitlements?.activeGrant?.product ?? null;
   const hasPass = !!entitlements?.signalAccess;
   const authenticated = !!entitlements?.authenticated;
+  const connected = walletStatus === "connected";
+
+  /**
+   * PURCHASE-INTENT CONTINUATION — the second half of the "click a plan
+   * does nothing" fix. When an anonymous visitor clicks a plan we start
+   * the auth chain from that click; the plan they wanted is remembered
+   * here and the moment the session lands (shared AuthProvider flips
+   * `authenticated` for the WHOLE app) the payment dialog opens by itself.
+   * Previously the click ended at a (possibly stale) "choose plan" button
+   * that led straight into another sign-in prompt — from the user's view,
+   * "the purchase never started".
+   */
+  const pendingProductRef = useRef<PaymentProduct | null>(null);
+  useEffect(() => {
+    if (authenticated && pendingProductRef.current) {
+      setProduct(pendingProductRef.current);
+      pendingProductRef.current = null;
+    }
+  }, [authenticated]);
 
   /**
    * Continue the auth chain from THIS click — the AGW connect/signature
@@ -59,9 +79,10 @@ export function PricingSection() {
    * gesture, so a click here is exactly the right trigger (same pattern as
    * SignalSection's ConnectGate). No dead disabled buttons for visitors.
    */
-  const startAuth = () => {
-    if (walletStatus === "connected") void signIn();
-    else login();
+  const startAuth = (intended: PaymentProduct | null = null) => {
+    if (intended) pendingProductRef.current = intended;
+    if (connected) void signIn();
+    else void login();
   };
 
   return (
@@ -92,7 +113,7 @@ export function PricingSection() {
               className="mt-4 w-full gap-1.5 font-bold"
               variant="outline"
               disabled={authenticated || signingIn}
-              onClick={startAuth}
+              onClick={() => startAuth()}
             >
               {signingIn ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -177,7 +198,9 @@ export function PricingSection() {
                   disabled={!!owned || signingIn}
                   onClick={() => {
                     if (!authenticated) {
-                      startAuth();
+                      // remember the intent — the dialog auto-opens once the
+                      // session lands (see pendingProductRef above)
+                      startAuth({ id: pass.id, name, pricePengu: pass.pricePengu });
                       return;
                     }
                     setProduct({ id: pass.id, name, pricePengu: pass.pricePengu });
@@ -190,6 +213,10 @@ export function PricingSection() {
                     </>
                   ) : signingIn && !authenticated ? (
                     <Loader2 className="size-4 animate-spin" />
+                  ) : !authenticated && connected ? (
+                    // state-accurate affordance: the next step is the
+                    // signature, not another wallet connection
+                    <PenLine className="size-4" />
                   ) : (
                     !authenticated && <Wallet className="size-4" />
                   )}
@@ -197,7 +224,9 @@ export function PricingSection() {
                     ? t("products.currentPlan")
                     : signingIn && !authenticated
                       ? t("wallet.signing")
-                      : t("products.choose")}
+                      : !authenticated && connected
+                        ? t("products.signInToBuy")
+                        : t("products.choose")}
                 </Button>
               </div>
             );
@@ -207,12 +236,19 @@ export function PricingSection() {
         {!authenticated && (
           <p className="mt-5 text-center text-xs text-muted-foreground">
             {/* state-accurate hint: connected users only need to sign in */}
-            {walletStatus === "connected" ? t("signal.signInFirst") : t("signal.connectFirst")}
+            {connected ? t("signal.signInFirst") : t("signal.connectFirst")}
           </p>
         )}
       </div>
 
-      <PaymentDialog key={product?.id ?? "none"} product={product} onClose={() => setProduct(null)} />
+      <PaymentDialog
+        key={product?.id ?? "none"}
+        product={product}
+        onClose={() => {
+          setProduct(null);
+          pendingProductRef.current = null;
+        }}
+      />
     </section>
   );
 }

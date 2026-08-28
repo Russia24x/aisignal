@@ -105,6 +105,7 @@
   },
   "products": {
     "choose": "Choose plan",
+    "signInToBuy": "Sign in to buy",
     "freeTierNote": "Registration and browsing are free — only signals require an access pass",
     "currentPlan": "Your current plan",
     "dayUnit": "day",

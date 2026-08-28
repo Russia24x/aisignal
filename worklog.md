@@ -1191,3 +1191,90 @@ Stage Summary:
 - Note for QA: sign-popup completion cannot be E2E-tested in this sandbox
   (needs a real Abstract wallet); verified up to popup-open + the full
   failure-feedback paths with real gestures
+
+---
+Task ID: 22
+Agent: main
+Task: ROOT-CAUSE FIX — "still must refresh for wallet-connected to show" + "clicking a tariff does nothing, purchase never starts" (user reports, Persian; persisted after Task 21)
+
+Work Log:
+- SESSION-START-SYNC-CHECK (per RULES.md): tree clean, local == origin/main
+  (7513956), no cron jobs, no force push
+- Deep SDK forensics BEFORE coding: read @privy-io/cross-app-connect dist
+  (client/connector/provider/request/triggerPopup/crypto) — connector.connect()
+  has a no-popup fast path when a persisted connection exists; eth_accounts
+  reads in-memory state populated at client construction (localStorage);
+  triggerPopup listens for PRIVY_CROSS_APP_CONNECT_RESPONSE window messages
+  with NO origin check — this enabled a faithful popup-approval simulation
+- ROOT CAUSE (architectural): useAuth was a plain hook → 8 INDEPENDENT
+  instances (Header, PricingSection, SignalSection ×2, PriceAlerts,
+  MyDashboard, PaymentDialog), each with its own entitlements snapshot.
+  Sign-in via the Header updated ONLY the Header; every other section kept
+  its stale anonymous state until a full reload re-fetched the session
+  (cookie/bearer) — the exact "must refresh" symptom. And because sections
+  saw anonymous state, a plan click re-entered the auth chain instead of
+  opening the payment dialog — "purchase never starts"
+- FIX 1 — shared auth state: NEW src/components/pengu/AuthProvider.tsx
+  (the entire former hook body in ONE context instance, mounted inside
+  AbstractWalletProvider in providers.tsx). useAuth.ts is now a thin
+  useContext wrapper with the SAME public API — zero changes needed at any
+  call site. One signIn/refresh/payment/connect now updates every section
+  in the same render pass
+- FIX 2 — purchase-intent continuation (PricingSection): a plan clicked
+  while anonymous is remembered (pendingProductRef); the moment the shared
+  authenticated flag flips true the PaymentDialog AUTO-OPENS with that
+  exact product — the click now ends at the payment dialog, not at a
+  re-rendered "choose plan" button
+- FIX 3 — state-accurate pricing CTAs: connected-but-anonymous cards now
+  show "Sign in to buy" (PenLine icon, new i18n key products.signInToBuy
+  fa+en) instead of the misleading "Choose plan" + wallet icon; defensive
+  toast added to signIn's no-address early return (no silent path left)
+- VERIFICATION (agent-browser, faithful popup simulation — dispatched
+  PRIVY_CROSS_APP_CONNECT_RESPONSE window messages with a valid base64
+  secp256k1 public key, completing the real SDK handshake from the real
+  click; server session real: nonce → viem-signed SIWE → verify → bearer):
+  * LIVE connect sync: ONE Header click → connect completes → WITHOUT any
+    reload Header flips to "ورود با امضا", SignalSection gate + its button
+    flip to sign-in copy, ALL 5 pricing CTAs flip to "برای خرید وارد شوید",
+    hint flips to signInFirst — [auth] session re-fetch fires once through
+    the shared provider ✓ (the exact previously-broken flow)
+  * Authenticated mount: token + connection → reload → all sections
+    consistent (profile dropdown, PassGate, dashboard, free-tier current)
+    with sessionMode "bearer" ✓
+  * Live sign-out flip DOWN: dropdown → disconnect → all sections flip to
+    ConnectGate/anonymous LIVE (wallet_revokePermissions path) ✓
+  * PURCHASE CONTINUATION (the money test): fresh anonymous page + token
+    injected + one click on the 7-day plan → login() popup → simulated
+    approval → connect → session refresh → authenticated → PaymentDialog
+    AUTO-OPENED showing "پاس ۷ روزه" / 63 PENGU / treasury 0x60df…8818 /
+    manual-hash fallback; pay button correctly disabled (test wallet has
+    0 PENGU balance) ✓ — dialog closes cleanly ✓
+  * VLM review of the dialog+pricing screenshot: centering correct, no
+    clipping, RTL correct, no overlaps
+  * Mobile 390px: zero horizontal overflow, footer at natural bottom
+    (bodyH 5494); desktop 1280×800 clean
+  * HMAC verification proven working end-to-end: a hand-mangled token
+    (my own copy-paste error) was correctly REJECTED (sessionMode null) —
+    the security chain rejects tampered tokens
+- Cleanup: QA test users (0x8E94…, 0x984E…) + all nonces deleted from dev
+  DB — only the real user (0x44EE…, loginCount 17) and the treasury login
+  remain; QA helper script deleted (test artifacts never go to GitHub);
+  browser storage cleared
+- lint clean, tsc clean, dev.log clean, zero page errors
+
+Stage Summary:
+- Both persisted symptoms fixed at the architectural root: the session
+  state is now SHARED (one AuthProvider instance for the whole app), so
+  connect / sign-in / payment / disconnect anywhere update every section
+  live — the page reload is no longer part of any auth flow
+- The purchase journey is continuous: click plan → (connect popup) →
+  (sign popup) → payment dialog opens BY ITSELF with the chosen product;
+  every intermediate state has accurate, localized copy ("Sign in to buy")
+- QA technique documented for future cycles: the AGW popup approval can be
+  simulated in-browser (PRIVY_CROSS_APP_CONNECT_RESPONSE message + valid
+  secp256k1 public key) making the connect→sync chain testable without a
+  real Abstract wallet; the signature step remains real-wallet-only
+- Remaining known/accepted: sign-popup completion still needs a real
+  wallet for E2E (everything up to popup-open and the full state machine
+  verified); bearer token stays valid until exp after logout on other
+  devices (documented SIWE+JWT trade-off)

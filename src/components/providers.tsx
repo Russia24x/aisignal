@@ -22,6 +22,7 @@ import { AbstractWalletProvider } from "@abstract-foundation/agw-react";
 import { QueryClient } from "@tanstack/react-query";
 import { I18nProvider } from "@/components/i18n/I18nProvider";
 import { Toaster } from "@/components/ui/sonner";
+import { AuthProvider } from "@/components/pengu/AuthProvider";
 import { publicConfig } from "@/lib/public-config";
 import { installAgwBridge } from "@/lib/agw-bridge";
 
@@ -45,8 +46,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
           transport={transport}
           queryClient={queryClient}
         >
-          {children}
-          <Toaster position="top-center" closeButton richColors />
+          {/* SINGLE shared auth/session state: every useAuth() consumer
+              (Header, gates, pricing, dashboard, alerts, payment dialog)
+              reads this one instance — sign-in / payment / connect anywhere
+              updates every section live, no reload needed. */}
+          <AuthProvider>
+            {children}
+            <Toaster position="top-center" closeButton richColors />
+          </AuthProvider>
         </AbstractWalletProvider>
       </ThemeProvider>
     </I18nProvider>
