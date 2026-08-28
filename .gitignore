@@ -64,6 +64,23 @@ server.log
 /download/
 /tool-results/
 /agent-ctx/
+/qa-*.png
+
+# --- sandbox-only infra (never push; kept locally for dev) ---
+/tests/
+/.zscripts/
+/examples/
+/mini-services/
+/scripts/
+/Caddyfile
+/RULES.md
+/db/
+
+# --- Cloudflare Workers (OpenNext) build output & local secrets ---
+/.open-next/
+/.dev.vars
+/.wrangler/
+cloudflare-env.d.ts
 
 # runtime pid files
 .zscripts/*.pid
