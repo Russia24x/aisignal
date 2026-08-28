@@ -126,13 +126,17 @@ export async function evaluateOpenSignals(): Promise<number> {
 export async function getSignalHistory(
   limit = 30,
   offset = 0,
-): Promise<{ items: SignalHistoryItem[]; stats: Record<string, number>; total: number }> {
+): Promise<{ items: SignalHistoryItem[]; stats: Record<string, number>; total: number; curve: Array<{ day: string; cum: number }> }> {
   await evaluateOpenSignals();
   const today = new Date().toISOString().slice(0, 10);
   const where = { day: { lt: today } };
   const [rows, statRows, total] = await Promise.all([
     db.signal.findMany({ where, orderBy: { day: "desc" }, take: limit, skip: offset }),
-    db.signal.findMany({ where, select: { action: true, confidence: true, price: true, outcome: true, outcomePrice: true } }),
+    db.signal.findMany({
+      where,
+      select: { day: true, action: true, confidence: true, price: true, outcome: true, outcomePrice: true },
+      orderBy: { day: "asc" },
+    }),
     db.signal.count({ where }),
   ]);
   const toChange = (s: { outcomePrice: number | null; price: number }) =>
@@ -173,5 +177,22 @@ export async function getSignalHistory(
         ? Math.round((statRows.reduce((a, i) => a + i.confidence, 0) / statRows.length) * 10) / 10
         : 0,
   };
-  return { items, stats, total };
+
+  // Equity curve — cumulative strategy return (%) over closed signals,
+  // chronological. Strategy return per signal: BUY → +Δ%, SELL → −Δ%,
+  // HOLD → 0 (flat by definition). Simple sum (not compounded) — honest
+  // and easy to reason about; recomputed from the same statRows as the
+  // other stats, so pagination never affects it.
+  let cum = 0;
+  const curve: Array<{ day: string; cum: number }> = [];
+  for (const s of statRows) {
+    if (s.outcome !== "WIN" && s.outcome !== "LOSS") continue;
+    const change = s.outcomePrice !== null && s.price > 0 ? ((s.outcomePrice - s.price) / s.price) * 100 : null;
+    if (change === null) continue;
+    const ret = s.action === "BUY" ? change : s.action === "SELL" ? -change : 0;
+    cum += Math.round(ret * 100) / 100;
+    curve.push({ day: s.day, cum: Math.round(cum * 100) / 100 });
+  }
+
+  return { items, stats, total, curve };
 }

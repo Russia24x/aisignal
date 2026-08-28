@@ -160,7 +160,10 @@
     "empty": "No signals recorded yet — today's signal will be the first.",
     "showing": "Showing {shown} of {total} signals",
     "loadMore": "Load more",
-    "loadingMore": "Loading…"
+    "loadingMore": "Loading…",
+    "curve": "Cumulative strategy return",
+    "curveHint": "Sum of evaluated signal returns (BUY: +Δ%, SELL: −Δ%)",
+    "curveEmpty": "The cumulative return chart appears after the first evaluation (24h after each signal)"
   },
   "engine": {
     "title": "Inside the Analysis Engine",

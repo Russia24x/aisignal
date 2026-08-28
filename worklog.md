@@ -917,3 +917,59 @@ Stage Summary:
 - App Voting deemed not applicable (needs portal-listed appId) — documented
 - Remaining roadmap candidates: admin panel, Telegram/email alert delivery,
   KV-based rate limiting for multi-isolate Workers deploy
+
+---
+Task ID: 18
+Agent: main
+Task: Scheduled webDevReview cycle 1 — QA pass + equity-curve & win-rate-ring feature (TrackRecord upgrade)
+
+Work Log:
+- SESSION-START: reviewed worklog (Task 17 done — official SIWE migration);
+  tree clean, local == origin/main (b2649bd); dev server healthy on :3000
+- QA (agent-browser, fresh session): page loads with ZERO page errors and
+  ZERO console errors; chart tabs (90d/48h) switch cleanly; FAQ accordion
+  opens; all sections render (market/signal/pricing/alerts/track/engine/
+  FAQ/footer); all API calls 200 — NO bugs found → proceeded to feature work
+- FEATURE (this cycle): TrackRecord performance panel
+  * Backend: getSignalHistory() now also returns `curve` — cumulative
+    strategy return (%) over closed signals, chronological (BUY → +Δ%,
+    SELL → −Δ%, HOLD → 0; simple sum, honest non-compounded). Computed
+    from the existing statRows query → ZERO extra DB queries; pagination-
+    independent (always whole history)
+  * /api/signal/history passes `curve` through
+  * Frontend TrackRecord.tsx redesign of the stats area:
+    - WinRateRing: animated SVG circular progress (color tiers:
+      ≥60% buy-green, ≥40% primary, else sell-red; 1s ease-out dashoffset
+      transition + glow drop-shadow; aria-label with value)
+    - EquityCurve: SVG area sparkline (640×112, gradient fill, dashed
+      zero baseline, end-point marker dot, buy/sell coloring by final cum,
+      preserveAspectRatio=none responsive)
+    - End-value pill (+X.X% / −X.X% with ring color)
+    - Empty state: dashed-border placeholder with localized explanation
+      (curve appears after first 24h evaluation)
+    - StatCards: hover micro-interaction (-translate-y-0.5, border-primary,
+      shadow glow); stats grid restructured (winRate moved into ring)
+  * i18n: track.curve / track.curveHint / track.curveEmpty (FA + EN)
+- VERIFICATION:
+  * API with 8 seeded closed signals: curve=[1.9,7,4.4,4.4,9,7.2,9.3,12.5]
+    — math hand-verified per-signal (BUY/SELL sign logic correct)
+  * Browser DOM: ring SVG 112px renders, curve SVG 976×112 with 2 paths
+  * VLM desktop: "circular progress ring showing 75%… cumulative return
+    line/area chart with dashed zero baseline… no overlapping/cut-off/
+    misalignment" — matches stats.winRate=75 from API
+  * Mobile 390px: no horizontal overflow, ring correctly sized, curve
+    full-width
+  * Empty state (after test-data cleanup): localized placeholder + empty
+    table both render
+  * Test signals deleted — dev DB back to honest state (1 real OPEN signal)
+- lint clean, tsc clean, dev.log clean
+
+Stage Summary:
+- QA cycle passed with zero bugs; delivered the TrackRecord performance
+  panel (win-rate ring + equity curve) — the track record now shows the
+  engine's cumulative performance visually, not just stat numbers
+- Curve is computed server-side at zero extra query cost and is immune to
+  pagination; math verified against seeded data
+- Next candidates: admin panel (owner view of users/payments), Telegram
+  alert delivery, KV rate limiting for Workers, per-signal tooltip detail
+  on the curve

@@ -15,6 +15,6 @@ export async function GET(req: NextRequest) {
   const offsetParam = Number(req.nextUrl.searchParams.get("offset") ?? "0");
   const offset = Number.isFinite(offsetParam) ? Math.max(Math.trunc(offsetParam), 0) : 0;
 
-  const { items, stats, total } = await getSignalHistory(limit, offset);
-  return NextResponse.json({ ok: true, items, stats, total });
+  const { items, stats, total, curve } = await getSignalHistory(limit, offset);
+  return NextResponse.json({ ok: true, items, stats, total, curve });
 }

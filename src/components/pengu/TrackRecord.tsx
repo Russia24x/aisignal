@@ -5,19 +5,25 @@
  * Built from the Signal table (auto-evaluated T+24h). No demo data:
  * starts empty and fills as days pass.
  *
- * Pagination: fetches pages of 30 with a "Load more" button; stats and
- * the shown/total counter always reflect the ENTIRE history.
+ * Pagination: fetches pages of 30 with a "Load more" button; stats, the
+ * shown/total counter and the equity curve always reflect the ENTIRE
+ * history (curve + stats are computed server-side over all rows).
+ *
+ * Visuals:
+ *  - WinRateRing: animated circular progress for the win rate
+ *  - EquityCurve: cumulative strategy-return sparkline (SVG area chart,
+ *    zero baseline, gradient fill, end-point marker)
  *
  * @module components/pengu/TrackRecord
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { fmt } from "./useMarket";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { History, Loader2, Trophy } from "lucide-react";
+import { History, Loader2, TrendingUp, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 30;
@@ -41,10 +47,16 @@ interface Stats {
   avgConfidence: number;
 }
 
+interface CurvePoint {
+  day: string;
+  cum: number;
+}
+
 export function TrackRecord() {
   const { t } = useI18n();
   const [items, setItems] = useState<Item[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [curve, setCurve] = useState<CurvePoint[] | null>(null);
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
@@ -56,6 +68,7 @@ export function TrackRecord() {
         if (d.ok) {
           setItems(d.items);
           setStats(d.stats);
+          setCurve(d.curve ?? []);
           setTotal(d.total ?? d.items.length);
         } else setError(true);
       })
@@ -78,6 +91,7 @@ export function TrackRecord() {
         const seen = new Set(items.map((i) => i.day));
         setItems([...items, ...(d.items as Item[]).filter((i) => !seen.has(i.day))]);
         setStats(d.stats);
+        setCurve(d.curve ?? []);
         setTotal(d.total ?? 0);
       }
     } catch {
@@ -88,6 +102,8 @@ export function TrackRecord() {
   }, [items, loadingMore]);
 
   const hasMore = items !== null && items.length < total;
+  const hasCurve = (curve?.length ?? 0) >= 2;
+  const finalCum = curve && curve.length > 0 ? curve[curve.length - 1].cum : 0;
 
   return (
     <section id="track" className="scroll-mt-20 px-4 py-16">
@@ -100,13 +116,58 @@ export function TrackRecord() {
           <p className="mt-2 text-sm text-muted-foreground">{t("track.subtitle")}</p>
         </header>
 
-        {/* stats */}
+        {/* performance panel: win-rate ring + equity curve + stat cards */}
         {stats && (
-          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label={t("track.winRate")} value={`${stats.winRate}%`} accent />
-            <StatCard label={t("track.closedSignals")} value={String(stats.closed)} />
-            <StatCard label={t("track.avgConfidence")} value={`${stats.avgConfidence}%`} />
-            <StatCard label={t("signal.day")} value={String(stats.total)} />
+          <div className="glass-card mb-5 p-4 sm:p-5">
+            <div className="grid items-center gap-5 lg:grid-cols-[auto_1fr]">
+              {/* Win-rate ring */}
+              <WinRateRing
+                value={stats.winRate}
+                closed={stats.closed}
+                label={t("track.winRate")}
+              />
+
+              {/* Equity curve */}
+              <div className="min-w-0">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
+                    <TrendingUp className="size-3.5 text-primary" />
+                    {t("track.curve")}
+                  </span>
+                  {hasCurve && (
+                    <span
+                      dir="ltr"
+                      className={cn(
+                        "rounded-full px-2.5 py-0.5 font-mono text-xs font-black ring-1",
+                        finalCum >= 0
+                          ? "bg-buy/10 text-buy ring-buy/30"
+                          : "bg-sell/10 text-sell ring-sell/30",
+                      )}
+                    >
+                      {finalCum >= 0 ? "+" : ""}
+                      {finalCum.toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+                {hasCurve ? (
+                  <EquityCurve points={curve!} />
+                ) : (
+                  <div className="grid h-28 place-items-center rounded-xl border border-dashed border-border/60 bg-card/30 px-4 text-center">
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      {t("track.curveEmpty")}
+                    </p>
+                  </div>
+                )}
+                <p className="mt-1.5 text-[10px] text-muted-foreground/70">{t("track.curveHint")}</p>
+              </div>
+            </div>
+
+            {/* stat cards */}
+            <div className="mt-5 grid grid-cols-3 gap-3 border-t border-border/50 pt-4">
+              <StatCard label={t("track.closedSignals")} value={String(stats.closed)} />
+              <StatCard label={t("track.avgConfidence")} value={`${stats.avgConfidence}%`} />
+              <StatCard label={t("signal.day")} value={String(stats.total)} />
+            </div>
           </div>
         )}
 
@@ -204,11 +265,141 @@ export function TrackRecord() {
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+/* ------------------------------------------------------------------ */
+/* WinRateRing — animated circular progress                            */
+/* ------------------------------------------------------------------ */
+
+function WinRateRing({
+  value,
+  closed,
+  label,
+}: {
+  value: number;
+  closed: number;
+  label: string;
+}) {
+  const R = 34;
+  const C = 2 * Math.PI * R;
+  const pct = Math.min(Math.max(value, 0), 100);
+  const color = pct >= 60 ? "var(--buy)" : pct >= 40 ? "var(--primary)" : "var(--sell)";
+
   return (
-    <div className="glass-card px-4 py-3">
+    <div
+      className="relative grid size-28 shrink-0 place-items-center"
+      role="img"
+      aria-label={`${label}: ${pct}% (${closed})`}
+    >
+      <svg viewBox="0 0 80 80" className="size-28 -rotate-90">
+        {/* track */}
+        <circle cx="40" cy="40" r={R} fill="none" stroke="var(--border)" strokeWidth="7" opacity="0.5" />
+        {/* progress */}
+        <circle
+          cx="40"
+          cy="40"
+          r={R}
+          fill="none"
+          stroke={color}
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeDasharray={C}
+          strokeDashoffset={C - (pct / 100) * C}
+          style={{
+            transition: "stroke-dashoffset 1s cubic-bezier(0.22, 1, 0.36, 1)",
+            filter: `drop-shadow(0 0 6px ${color}55)`,
+          }}
+        />
+      </svg>
+      <div className="absolute inset-0 grid place-items-center">
+        <div className="text-center">
+          <div className="font-mono text-xl font-black leading-none" dir="ltr">
+            {pct}%
+          </div>
+          <div className="mt-1 text-[9px] font-bold text-muted-foreground">{label}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* EquityCurve — cumulative strategy return sparkline (SVG)            */
+/* ------------------------------------------------------------------ */
+
+function EquityCurve({ points }: { points: CurvePoint[] }) {
+  const { t } = useI18n();
+  const W = 640;
+  const H = 112;
+  const PAD = 6;
+
+  const path = useMemo(() => {
+    const n = points.length;
+    const xs = (i: number) => (n <= 1 ? W / 2 : PAD + (i / (n - 1)) * (W - 2 * PAD));
+    const min = Math.min(0, ...points.map((p) => p.cum));
+    const max = Math.max(0, ...points.map((p) => p.cum));
+    const span = max - min || 1;
+    const ys = (v: number) => H - PAD - ((v - min) / span) * (H - 2 * PAD);
+
+    const line = points.map((p, i) => `${i === 0 ? "M" : "L"}${xs(i).toFixed(1)},${ys(p.cum).toFixed(1)}`).join(" ");
+    const zeroY = ys(0);
+    const area = `${line} L${xs(n - 1).toFixed(1)},${zeroY.toFixed(1)} L${xs(0).toFixed(1)},${zeroY.toFixed(1)} Z`;
+    const last = points[n - 1];
+    return { line, area, zeroY, lastX: xs(n - 1), lastY: ys(last.cum), positive: last.cum >= 0 };
+  }, [points]);
+
+  const stroke = path.positive ? "var(--buy)" : "var(--sell)";
+
+  return (
+    <div
+      className="overflow-hidden rounded-xl border border-border/60 bg-card/30"
+      dir="ltr"
+      title={`${t("track.curve")}: ${path.positive ? "+" : ""}${points[points.length - 1].cum.toFixed(1)}%`}
+    >
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-28 w-full" preserveAspectRatio="none" role="img" aria-label={t("track.curve")}>
+        <defs>
+          <linearGradient id="equity-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={stroke} stopOpacity="0.28" />
+            <stop offset="100%" stopColor={stroke} stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        {/* zero baseline */}
+        <line
+          x1={PAD}
+          x2={W - PAD}
+          y1={path.zeroY}
+          y2={path.zeroY}
+          stroke="var(--muted-foreground)"
+          strokeOpacity="0.35"
+          strokeDasharray="4 4"
+          strokeWidth="1"
+        />
+        {/* area + line */}
+        <path d={path.area} fill="url(#equity-fill)" />
+        <path
+          d={path.line}
+          fill="none"
+          stroke={stroke}
+          strokeWidth="2.2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          style={{ filter: `drop-shadow(0 0 4px ${path.positive ? "var(--buy)" : "var(--sell)"}44)` }}
+        />
+        {/* end-point marker */}
+        <circle cx={path.lastX} cy={path.lastY} r="3.4" fill={stroke} />
+        <circle cx={path.lastX} cy={path.lastY} r="6.5" fill={stroke} opacity="0.25" />
+      </svg>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* StatCard                                                            */
+/* ------------------------------------------------------------------ */
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-card/40 px-4 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-card/70 hover:shadow-[0_4px_20px_-6px_var(--primary-glow,rgba(45,212,191,0.25))]">
       <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className={cn("mt-1 font-mono text-xl font-black", accent && "text-primary")} dir="ltr">
+      <div className="mt-1 font-mono text-xl font-black" dir="ltr">
         {value}
       </div>
     </div>
