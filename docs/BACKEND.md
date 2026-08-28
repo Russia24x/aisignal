@@ -81,7 +81,10 @@ export async function POST(req: NextRequest) {
 - پورت مستقل ۳۰۳۳، socket.io، ورود از مرورگر: `io("/?XTransformPort=3033")` (گیت‌وی Caddy)
 - polling تطبیقی: ۱۵s وقتی کلاینت متصل، ۶۰s idle (صرفه‌جویی ۷۵٪ درخواست)
 - transport: polling-first (درس‌آموخته از محیط sandbox؛ websocket-first باعث reconnect-loop از پشت گیت‌وی می‌شد)
-- محدودیت صداقت: در استقرار واقعی (Workers) باید با Durable Objects جایگزین شود — مستند در DEPLOYMENT.md
+- **فقط توسعهٔ محلی** — روی Cloudflare Workers اجرا نمی‌شود؛ در پروداکشن
+  `NEXT_PUBLIC_TICKER_WS=off` را تنظیم کنید و LiveTicker به‌طور خودکار از
+  REST با کش ۶۰ ثانیه‌ای (`/api/market/overview`) استفاده می‌کند (بدون
+  Durable Objects و بدون هزینه). مستند در DEPLOYMENT.md
 
 ## پیکربندی (`.env`)
 
@@ -103,6 +106,6 @@ export async function POST(req: NextRequest) {
 
 ## عملیات
 
-- **migrate دسترسی قدیم**: `scripts/migrate-legacy-access.ts` (idempotent — کاربران platformAccessAt بدون grant → LEGACY_PLATFORM 30 روزه)
+- **migrate دسترسی قدیم**: `scripts/migrate-legacy-access.ts` — فقط برای DB محلی قدیمی؛ اسکریپت sandbox-محلی است و در مخزن نیست (دیپلوی تازه با DB خالی شروع می‌شود و نیازی به آن ندارد)
 - **health**: `GET /api` → `{ ok, service, time }`
 - **لاگ‌ها**: ساخت‌یافته با context (auth/payments/market)؛ سطح از `LOG_LEVEL`

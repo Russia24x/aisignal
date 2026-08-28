@@ -37,6 +37,16 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    // Sandbox-only folders — not part of the shipped app/repo
+    "examples",
+    "skills",
+    "mini-services",
+    "tests",
+    "scripts",
+    ".zscripts",
+    "download",
+    "upload",
+    "tool-results"
   ]
 }

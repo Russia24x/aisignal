@@ -696,3 +696,72 @@ Stage Summary:
   bursts; (setsid nohup … &) restart pattern + closing Chrome recovers it
 - Next candidates: admin panel (owner view of users/payments), Telegram/email
   alert delivery, KV rate limiting for Cloudflare deploy
+
+---
+Task ID: 15
+Agent: main
+Task: Cloudflare free-tier deployment review + clean professional GitHub repo (user request, Persian)
+
+Work Log:
+- Verified user's earlier request still holds: cron list = 0 jobs, no GitHub
+  Actions workflows, no crontab → 15-min auto-dev system remains fully removed
+- SESSION-START-SYNC-CHECK: tree clean, local == origin/main (228352d)
+- RESEARCH (web): opennext.js.org confirms @opennextjs/cloudflare supports
+  ALL Next.js 16 minors → our 16.1.3 is deployable; Prisma 6 driverAdapters
+  preview enables @prisma/adapter-d1 while classic engine still works locally
+  (adapter-d1@7 initially installed by mistake → pinned to v6 to match prisma 6)
+- REPO CLEANING (commit b95f2c2): untracked 11 root qa-*.png screenshots,
+  tests/, .zscripts/ (8 sandbox scripts), examples/websocket demo,
+  mini-services/ws-ticker, scripts/migrate-legacy-access.ts (one-off, applied),
+  Caddyfile, RULES.md — all kept on disk for local dev, gitignored forever.
+  Tracked files: 180 → 143 (src + docs + prisma + public assets only)
+- CF-FREE WIRING:
+  * wrangler.jsonc — full worker config (nodejs_compat, assets binding,
+    D1 binding "DB" with placeholder id, non-secret vars; SESSION_SECRET via
+    `wrangler secret put` only)
+  * open-next.config.ts — minimal defineCloudflareConfig (no R2 → simplest)
+  * package.json — build→plain `next build`, +preview/deploy/cf-typegen;
+    devDeps @opennextjs/cloudflare@1.20.4 + wrangler@4.127.1
+  * next.config.ts — removed output:standalone (OpenNext does its own build);
+    images.unoptimized=true (both PNGs ~80KB, no sharp needed, zero cost)
+  * prisma/schema.prisma — previewFeatures=["driverAdapters"] + regenerate
+  * src/lib/db.ts — auto-selects D1 adapter (structural .prepare() detection
+    on process.env.DB/globalThis.DB) vs local SQLite classic client
+  * src/lib/config.ts — DATABASE_URL now optional (worker boots without it;
+    would have crashed the worker before)
+  * src/hooks/useTicker.ts — NEXT_PUBLIC_TICKER_WS toggle: "off" = pure REST
+    mode for Workers (zero socket attempts), default on for sandbox
+  * .env.example — documented the new switch
+  * tsconfig exclude — sandbox folders (examples/skills/…) no longer pollute tsc
+  * docs/DEPLOYMENT.md rewritten: 8-step Persian guide, everything free,
+    zero credit card; BACKEND/TECH-STACK/ACCESS-MODEL stale refs fixed
+- QA (agent-browser through gateway :81, fresh contexts):
+  * PRODUCTION SIMULATION: NEXT_PUBLIC_TICKER_WS=off + full dev restart →
+    zero socket.io requests, ticker renders REST data with honest "~60s"
+    badge ("PENGU/USD LIVE | PRICE $0.00926 • 24H -5.27% • VOL $38.9K …"),
+    zero page errors
+  * SANDBOX MODE restored (WS=on): socket.io polling 200s via gateway,
+    LIVE SOCKET MODE confirmed — no regression
+  * Pricing all 5 tiers present (10/63/240/2,555/5,110); FA→EN language
+    switch (rtl→ltr) works; mobile 390px zero horizontal overflow; footer
+    at natural bottom (footerBottom==bodyHeight)
+  * VLM: desktop 8/10, mobile 9/10 (consistent with previous rounds; reported
+    "title overlap" disproven by DOM measurement — 20px gap, false positive)
+  * lint clean, tsc fully clean (now includes src only), dev.log no errors
+
+Stage Summary:
+- User request fully delivered: system reviewed end-to-end for Cloudflare
+  FREE deploy (Workers + D1 + OpenNext, no credit card anywhere), and GitHub
+  repo cleaned to professional shipping shape (app source + docs only)
+- Deploy is now: npm install → wrangler login → d1 create (paste id) →
+  migrate diff + d1 execute → secret put → NEXT_PUBLIC_TICKER_WS=off →
+  npm run deploy. All pre-wired, no code edits needed
+- Dual-runtime db client verified both ways; ticker dual-mode verified both
+  ways (REST-only & socket) end-to-end in browser
+- Open / user-confirmation items (user asked to be consulted): 1) ws-ticker
+  mini-service kept locally but out of repo — could be deleted entirely if
+  REST-only is preferred everywhere; 2) rate limiting is per-isolate on
+  Workers (acceptable at this scale; KV/CF-WAF upgrade path documented);
+  3) unused template deps (next-auth, sharp, @mdxeditor, framer-motion,
+  zustand, uuid, date-fns, @dnd-kit, etc.) left in package.json to avoid
+  regression risk — pruning is a safe follow-up if desired

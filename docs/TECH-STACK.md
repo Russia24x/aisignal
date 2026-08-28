@@ -54,7 +54,7 @@
 - **ماژول‌های دامنه** (`src/lib/modules/`): `market` (داده + cache)، `analysis` (موتور ۱۱-اندیکاتوری + سرویس سیگنال)، `access` (entitlements/passes/payments)، `alerts`
 - **امنیت** (`src/lib/security/`): `siwe.ts` (nonce/پیام/verify)، `session.ts` (HMAC cookie)، `rate-limit.ts` (پنجرهٔ لغزان)
 - **Cache**: `TTLCache` درون‌حافظه با stale-while-revalidate (بدون ترافیک = صفر فراخوانی upstream)
-- **Mini-service**: `mini-services/ws-ticker` (socket.io، پورت ۳۰۳۳، polling تطبیقی 15s فعال/60s idle) — از گیت‌وی با `?XTransformPort=3033`
+- **Mini-service**: `mini-services/ws-ticker` (socket.io، پورت ۳۰۳۳، polling تطبیقی 15s فعال/60s idle) — از گیت‌وی با `?XTransformPort=3033` — فقط توسعهٔ محلی (در مخزن نیست؛ پروداکشن: حالت REST با `NEXT_PUBLIC_TICKER_WS=off`)
 
 ## منابع دادهٔ خارجی (سقف مصرف)
 

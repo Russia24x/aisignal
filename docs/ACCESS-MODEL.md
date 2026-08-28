@@ -83,8 +83,10 @@ uniqueness enforced twice (pre-check + inside the DB transaction).
 v1 products (`PLATFORM_ACCESS`, `DAY_PASS`, `SUB_7`, `SUB_30`) no longer
 exist. Old `Payment` rows keep their original product ids and render with
 "(legacy)" labels in the dashboard. Users who held v1 platform access and
-had no grants received a one-time 30-day `LEGACY_PLATFORM` grant via
-`scripts/migrate-legacy-access.ts` (idempotent — safe to re-run).
+had no grants received a one-time 30-day `LEGACY_PLATFORM` grant via a
+local-only migration script (`scripts/migrate-legacy-access.ts` — kept out
+of the repo; fresh production deploys start with an empty database and
+never need it).
 
 ## 5. Future: adding session keys (deliberately deferred)
 

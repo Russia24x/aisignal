@@ -33,7 +33,10 @@ const serverSchema = z.object({
   APP_URL: z.string().url().default("http://localhost:3000"),
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be >= 32 chars"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-  DATABASE_URL: z.string().min(1),
+  // Local dev only (SQLite file). On Cloudflare Workers the D1 binding
+  // replaces the URL entirely — see src/lib/db.ts. Optional so the worker
+  // boots without it.
+  DATABASE_URL: z.string().min(1).optional(),
 
   // Chain (server-side verification uses these)
   NEXT_PUBLIC_CHAIN_ID: z.coerce.number().int().positive(),

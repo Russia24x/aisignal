@@ -54,10 +54,24 @@ const INITIAL: UseTickerResult = {
   connected: false,
 };
 
+/**
+ * WebSocket feed switch.
+ * - "on" (default / unset): connect to the local ws-ticker mini-service.
+ *   Used in the dev sandbox behind the gateway.
+ * - "off": skip the socket entirely — the LiveTicker transparently runs on
+ *   the 60s REST snapshot from /api/market/overview. This is the mode used
+ *   for Cloudflare Workers deploys, where a separate socket.io service
+ *   cannot run (set NEXT_PUBLIC_TICKER_WS=off in .env before building).
+ * Inlined at build time — no runtime cost either way.
+ */
+const WS_ENABLED = process.env.NEXT_PUBLIC_TICKER_WS !== "off";
+
 export function useTicker(): UseTickerResult {
   const [state, setState] = useState<UseTickerResult>(INITIAL);
 
   useEffect(() => {
+    if (!WS_ENABLED) return; // REST-only mode (Cloudflare production)
+
     let cancelled = false;
     // socket.io-client is dynamically imported; we cast to a loose type to
     // avoid TS interop quirks between ESM/CJS namespaces vs the default

@@ -1,8 +1,12 @@
 // PenguSignals database schema
-// Local dev: SQLite. For Cloudflare D1 deployment see docs/DEPLOYMENT.md.
+// Local dev: SQLite. Production (Cloudflare Workers): D1 binding —
+// src/lib/db.ts picks the right client automatically. See docs/DEPLOYMENT.md.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // Enables the @prisma/adapter-d1 driver on Cloudflare Workers.
+  // Locally (no adapter passed) the classic engine path keeps working.
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
