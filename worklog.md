@@ -368,3 +368,56 @@ Stage Summary:
   (DexScreener 300 req/MIN, CoinGecko demo ~10-30 req/min, Binance 1200 weight/min)
 - Honest assessment recorded: what's real (working product, real payments, real engine) vs what's demo-only
   (ws-ticker architecture is sandbox-specific; deployment target needs different transport)
+
+---
+Task ID: 10
+Agent: main
+Task: Abstract Ecosystem alignment — research docs.abs.xyz + build.abs.xyz, integrate Abstract Profile, fix live ticker
+
+Work Log:
+- Researched official docs via agent-browser (JS-rendered pages): AGW overview,
+  JSON-RPC API reference, AI Agents resources, build.abs.xyz AGW Reusables portal
+- Extracted Abstract Profile component source from the official shadcn registry
+  (build.abs.xyz/r/abstract-profile.json) — component, hook, tier-colors, API route
+- Verified Abstract Portal API live: backend.portal.abs.xyz/api/user/address/{addr}
+  (owner wallet → no profile; jarrodwatts → tier 3 Gold, 16 badges, avatar URL)
+- IMPLEMENTED (adapted to our patterns, not copy-pasted):
+  - src/lib/abstract/profile.ts — types, tier colors (Bronze→Diamond), avatar URL logic
+  - /api/user-profile/[address] — rate-limited (public bucket), viem address validation,
+    5-min Next fetch cache, slimmed payload, profile:null for missing profiles
+  - src/hooks/useAbstractProfile.ts — react-query, 2-min staleTime
+  - src/components/abstract/AbstractProfile.tsx — tier ring, tooltip, skeleton, 3 sizes
+  - Header: Portal avatar replaces plain green dot in wallet button
+  - MyDashboard: PortalIdentity banner — lg avatar, name, tier badge (localized),
+    5 badge medals with tooltips, portal deep-link
+  - i18n: dashboard.portalIdentity/noPortalProfile/viewOnPortal/tier.1-5 (fa+en)
+- ECOSYSTEM ALIGNMENT ASSESSMENT (what we already had vs what's new):
+  - AGW native integration (AbstractWalletProvider): already in place ✅
+  - SIWE-style auth: custom implementation matches their reusable ✅
+  - JSON-RPC (chain 2741 via viem): already correct ✅
+  - Abstract Profile: NOW integrated ✅
+  - Session keys / sponsored txs / App Voting: documented as future candidates
+- LIVE TICKER ROOT-CAUSE SAGA (major reliability fix):
+  1. ws-ticker had hung since 10:53 — bun --hot reload crashed it with
+     ReferenceError: FETCH_INTERVAL_MS (stale module state mixing old/new code)
+  2. Zombie process held no port but survived pkill SIGTERM (graceful shutdown
+     hung on httpServer.close() never draining) → kill -9 needed
+  3. useTicker transports:["websocket","polling"] made failed WS upgrade fatal
+     through the Caddy gateway → reconnect loop, bar stuck on "loading…"
+  4. Sandbox reaps background processes after Bash commands complete (cgroup
+     OOM pressure: 4GB RAM, no swap, Chrome+Next.js eat ~3GB) — ws-ticker
+     survives only minutes after its starting command exits
+  FIXES: polling-first transport; REST fallback in LiveTicker (useMarket 60s
+  snapshot when socket dead — bar ALWAYS shows real data with "~60s" badge);
+  hardened shutdown with 2s hard-exit; removed bun --hot from dev script
+- Verified end-to-end through gateway (localhost:81): PRICE $0.00945, 24H
+  +0.61%, VOL $42.7K, LIQ $460.8K, FDV $22.84M all live; zero page errors
+- Lint clean, tsc clean; committed 8f03daa + pushed (normal push)
+
+Stage Summary:
+- Abstract Profile fully integrated (user's explicit request) with graceful degradation
+- Live ticker now has 3 layers of resilience: socket (15s) → REST fallback (60s) → loading state
+- Known sandbox limitation documented: background mini-services are reaped by
+  memory pressure after command exit; REST fallback covers this in preview
+- Next candidates: session keys autopay, sponsored transactions, Abstract App Voting,
+  AI agents resources (llms.txt/SKILL.MD) for future AI features
