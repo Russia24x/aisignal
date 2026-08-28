@@ -1531,3 +1531,76 @@ Stage Summary:
   stored signals to accumulate), curve tooltip with day jump-link to
   the detail dialog, optional email/Telegram alert delivery (needs an
   outbound-channel decision from the owner)
+
+---
+Task ID: 26
+Agent: main
+Task: Scheduled assessment round — QA passed clean → delivered the "Premium Polish & Live Urgency" package: tier-differentiated pricing cards (gold royal / diamond sheen), Market Mood Gauge, next-signal countdown, header scroll elevation, honest empty-state timeline
+
+Work Log:
+- SESSION-START-SYNC-CHECK (per RULES.md): tree clean, local == origin/main
+  (f8b2eb1), no cron jobs, no force push
+- STATUS ASSESSMENT FIRST: dev server 200, /api health ok, /api/agw/details
+  200, dev.log zero errors; DB: 1 signal (2026-08-28 BUY OPEN), 1 payment,
+  2 users, 0 alerts. Fresh-browser QA: 0 page errors, 9 sections, mobile
+  390px zero overflow. Interactive flows ALL green: plan-click → real
+  portal.abs.xyz AGW popup opens (regression-checked twice), FAQ accordion
+  single-open, share dropdown (X/Telegram), locale FA↔EN. Task 23-25
+  wallet/purchase fixes still holding → phase judged stable → feature round
+- FORENSIC NOTE (screenshot QA): full-page screenshots taken BEFORE
+  scrolling show invisible sections (Reveal starts hidden) — always scroll
+  to bottom + wait 1.5-2s first; same artifact as Task 25 note
+- VLM baseline audit (after reveals): 7.5/10 — top complaints: pricing
+  tiers not differentiated ("Royal/Diamond don't look premium"), empty
+  state placeholder-like, header lacks scroll depth, FAQ flat
+- NEW pricing tier identity (globals.css + PricingSection.tsx):
+  * tier-gold (PASS_365D Crown): amber luminous border + warm tint +
+    hover gold glow, "★ بهترین ارزش / Best value" badge, price in gold
+  * tier-diamond (PASS_LIFETIME Gem): ice-cyan luminous border, slow
+    travelling sheen sweep (4.6s, reduced-motion safe), "✦" badge at
+    start-3 (discount badge keeps end-3 — no collision), price in accent
+  * tier-popular (PASS_7D): keeps primary ring + adds hover glow
+  * all pass cards: group hover scales the icon chip 110%, transition-all
+- NEW MoodGauge.tsx — semicircular SVG dial for the free consensus
+  teaser: score = (bullish−bearish)/total ∈ [−1,+1] → needle angle, mood
+  bucket (veryBullish…veryBearish), gradient red→green arc, zone ticks,
+  bear/bull endpoints; CSS spring transition on the needle, aria-label
+  carries the mood phrase; teaser now grid: gauge (230px) + consensus
+  bar + paywall explainer line; math verified live: (6−5)/11 = +9%,
+  needle rotate(-8.18deg)
+- NEW NextSignalCountdown.tsx — ticking HH:MM:SS to next UTC midnight
+  (signals cut daily at 00:00 UTC); hydration-safe (dashes until first
+  client tick); urgency styling in the final 2 hours (hold color +
+  breathe); placed in SignalSection header above the subscribed badge;
+  title tooltip explains the UTC schedule
+- Header scroll elevation: passive scroll listener (>8px) toggles
+  .header-scrolled (shadow + denser bg-background/85); verified toggles
+  at top vs bottom
+- TrackRecord empty state: honest mini-timeline (pulsing today dot →
+  dashed connectors → hollow future dots → check circle) + copy "first
+  outcome lands tomorrow, table fills day by day" (fa+en) — VLM: "looks
+  intentional, premium waiting-room feel"
+- i18n: +9 keys fa + 9 keys en (signal.mood.*, signal.nextSignal*,
+  products.bestValue, track.emptyTimeline)
+- QA ALL GREEN: lint clean, tsc clean, fresh-browser 0 errors; gauge/
+  countdown/pill verified in FA+EN, RTL+LTR; mobile 390px: no overflow,
+  gauge 220px fits, stacks vertically; tier classes confirmed in DOM
+  (plain|plain|tier-popular|plain|tier-gold|tier-diamond); plan-click
+  regression PASSED (popup opens); dev.log clean
+- VLM scores this round: gauge band 9/10, pricing band 9/10 ("premium
+  ladder reads instantly"), track band 9/10, final holistic 8.5/10
+  (baseline 7.5/10)
+
+Stage Summary:
+- The pricing ladder now SELLS itself visually: green = entry, gold =
+  best value, diamond = ultimate — before a single word is read
+- Free teaser upgraded from a flat bar to an animated mood dial (the
+  first "wow" moment for anonymous visitors) + a live countdown that
+  makes the daily cadence tangible (urgency driver)
+- Track-record emptiness now reads as "day 1 of an honest system", not
+  a broken table
+- Next-phase candidates (from final VLM audit): micro-interaction pass
+  (price ticker pulse, chart gradient sweep), subtle noise texture
+  overlay (2-3%) to prevent OLED banding, gamified onboarding roadmap
+  in the empty state; alert delivery (email/Telegram) still awaiting an
+  outbound-channel decision from the owner

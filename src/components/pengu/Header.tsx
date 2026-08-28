@@ -5,7 +5,7 @@
  *
  * @module components/pengu/Header
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useBalance } from "wagmi";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
@@ -28,6 +28,17 @@ export function Header() {
   const { address, entitlements, signingIn, login, signIn, signOut, walletStatus, chainId, needsSignIn } = useAuth();
   const { data } = useMarket();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Scroll-depth cue: the header gains elevation (shadow + denser
+  // backdrop) once the page actually scrolls — keeps the top edge airy
+  // at rest, unmistakably "floating above content" mid-page.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   // Wallet balances for the dropdown (official ConnectWalletButton pattern —
   // build.abs.xyz/docs/authentication/connect-wallet-button shows the
@@ -60,7 +71,12 @@ export function Header() {
   const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/50 bg-background/70 backdrop-blur-xl">
+    <header
+      className={cn(
+        "sticky top-0 z-40 border-b border-border/50 bg-background/70 backdrop-blur-xl transition-shadow duration-300",
+        scrolled && "header-scrolled bg-background/85",
+      )}
+    >
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
         {/* Brand */}
         <a href="#top" className="flex items-center gap-2.5">

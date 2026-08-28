@@ -37,12 +37,41 @@ import {
   type AccessPassId,
 } from "@/lib/modules/access/passes";
 
-const TIER_META: Record<AccessPassId, { icon: LucideIcon; i18nKey: string; highlight: boolean; bestValue?: boolean }> = {
-  PASS_1D: { icon: Zap, i18nKey: "pass1d", highlight: false },
-  PASS_7D: { icon: Ticket, i18nKey: "pass7d", highlight: true },
-  PASS_30D: { icon: Sparkles, i18nKey: "pass30d", highlight: false },
-  PASS_365D: { icon: Crown, i18nKey: "pass365d", highlight: false, bestValue: true },
-  PASS_LIFETIME: { icon: Gem, i18nKey: "passLifetime", highlight: false },
+/**
+ * Per-tier visual identity. Every pass keeps the glass-card base, but
+ * premium tiers get their own aura so the upgrade ladder *reads* before
+ * a single word is parsed:
+ *   1d   → plain ice (entry point)
+ *   7d   → primary ring + glow (the popular default)
+ *   30d  → plain ice
+ *   365d → gold "royal" theme (Crown)
+ *   life → diamond theme with a slow travelling sheen (Gem)
+ */
+type TierTheme = "ice" | "popular" | "gold" | "diamond";
+
+const TIER_META: Record<
+  AccessPassId,
+  { icon: LucideIcon; i18nKey: string; highlight: boolean; bestValue?: boolean; theme: TierTheme }
+> = {
+  PASS_1D: { icon: Zap, i18nKey: "pass1d", highlight: false, theme: "ice" },
+  PASS_7D: { icon: Ticket, i18nKey: "pass7d", highlight: true, theme: "popular" },
+  PASS_30D: { icon: Sparkles, i18nKey: "pass30d", highlight: false, theme: "ice" },
+  PASS_365D: { icon: Crown, i18nKey: "pass365d", highlight: false, bestValue: true, theme: "gold" },
+  PASS_LIFETIME: { icon: Gem, i18nKey: "passLifetime", highlight: false, theme: "diamond" },
+};
+
+/** Tailwind classes for the tier icon chip + price colour. */
+const TIER_CHIP: Record<TierTheme, { chip: string; price: string }> = {
+  ice: { chip: "bg-muted/40 text-ice ring-border", price: "text-primary" },
+  popular: { chip: "bg-primary/20 text-primary ring-primary/40", price: "text-primary" },
+  gold: {
+    chip: "bg-hold/15 text-hold ring-hold/40",
+    price: "text-hold",
+  },
+  diamond: {
+    chip: "bg-accent/15 text-accent ring-accent/40",
+    price: "text-accent",
+  },
 };
 
 export function PricingSection() {
@@ -142,13 +171,25 @@ export function PricingSection() {
               <div
                 key={pass.id}
                 className={cn(
-                  "glass-card relative flex flex-col p-5 transition-transform hover:-translate-y-1",
-                  meta.highlight && "ring-2 ring-primary/50",
+                  "group glass-card relative flex flex-col p-5 transition-all duration-300 hover:-translate-y-1",
+                  meta.theme === "popular" && "tier-popular ring-2 ring-primary/50",
+                  meta.theme === "gold" && "tier-gold",
+                  meta.theme === "diamond" && "tier-diamond",
                 )}
               >
+                {/* travelling sheen layer (diamond tier only, CSS-animated) */}
+                {meta.theme === "diamond" && <span aria-hidden className="diamond-sheen" />}
                 {meta.bestValue && (
-                  <Badge className="absolute -top-2.5 start-1/2 -translate-x-1/2 bg-primary px-3 font-black text-primary-foreground">
-                    ★
+                  <Badge className="absolute -top-2.5 start-1/2 -translate-x-1/2 bg-hold px-3 font-black text-hold-foreground shadow-lg shadow-hold/20">
+                    ★ {t("products.bestValue")}
+                  </Badge>
+                )}
+                {meta.theme === "diamond" && (
+                  <Badge
+                    className="absolute -top-2.5 start-3 bg-accent/90 px-2 py-0.5 font-black text-accent-foreground shadow-lg shadow-accent/20"
+                    aria-hidden
+                  >
+                    ✦
                   </Badge>
                 )}
                 {hasDiscount && (
@@ -161,8 +202,8 @@ export function PricingSection() {
                 )}
                 <span
                   className={cn(
-                    "grid size-11 place-items-center rounded-xl ring-1",
-                    meta.highlight ? "bg-primary/20 text-primary ring-primary/40" : "bg-muted/40 text-ice ring-border",
+                    "grid size-11 place-items-center rounded-xl ring-1 transition-transform duration-300 group-hover:scale-110",
+                    TIER_CHIP[meta.theme].chip,
                   )}
                 >
                   <Icon className="size-6" />
@@ -178,7 +219,7 @@ export function PricingSection() {
                         {pass.basePricePengu.toLocaleString("en-US")}
                       </span>
                     )}
-                    <span className="font-mono text-3xl font-black text-primary">
+                    <span className={cn("font-mono text-3xl font-black", TIER_CHIP[meta.theme].price)}>
                       {pass.pricePengu.toLocaleString("en-US")}
                     </span>
                     <span className="text-xs font-bold text-muted-foreground">PENGU</span>

@@ -393,6 +393,113 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Pricing tier themes — each pass gets its own aura (PricingSection)  */
+/* ------------------------------------------------------------------ */
+
+/* Gold "royal" tier — yearly pass (Crown). Warm amber prestige. */
+.tier-gold {
+  background:
+    linear-gradient(160deg, oklch(0.75 0.16 85 / 0.08), transparent 45%),
+    var(--card);
+}
+.tier-gold::before {
+  background: linear-gradient(
+    140deg,
+    oklch(0.8 0.15 85 / 0.5),
+    oklch(0.72 0.16 165 / 0.18) 40%,
+    transparent 60%,
+    oklch(0.75 0.14 85 / 0.35)
+  ) !important;
+  opacity: 0.9 !important;
+}
+.tier-gold:hover {
+  box-shadow:
+    0 12px 40px oklch(0.75 0.15 85 / 0.14),
+    0 0 0 1px oklch(0.78 0.14 85 / 0.35);
+}
+
+/* Diamond tier — lifetime pass (Gem). Cool ice shimmer + travelling shine. */
+.tier-diamond {
+  background:
+    linear-gradient(150deg, oklch(0.86 0.06 200 / 0.1), transparent 40%, oklch(0.8 0.1 185 / 0.06)),
+    var(--card);
+}
+.tier-diamond::before {
+  background: linear-gradient(
+    140deg,
+    oklch(0.9 0.05 210 / 0.55),
+    oklch(0.72 0.16 165 / 0.2) 35%,
+    transparent 55%,
+    oklch(0.86 0.06 200 / 0.5)
+  ) !important;
+  opacity: 0.9 !important;
+}
+.tier-diamond:hover {
+  box-shadow:
+    0 12px 44px oklch(0.86 0.06 200 / 0.16),
+    0 0 0 1px oklch(0.86 0.06 200 / 0.4);
+}
+/* Slow luminous sweep across the diamond card (very subtle) */
+@keyframes diamond-sheen {
+  0% { transform: translateX(-130%) skewX(-18deg); }
+  55%, 100% { transform: translateX(240%) skewX(-18deg); }
+}
+.tier-diamond .diamond-sheen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.tier-diamond .diamond-sheen::after {
+  content: "";
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  width: 34%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    oklch(0.95 0.02 200 / 0.09) 45%,
+    oklch(0.98 0 0 / 0.14) 50%,
+    oklch(0.95 0.02 200 / 0.09) 55%,
+    transparent
+  );
+  animation: diamond-sheen 4.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tier-diamond .diamond-sheen::after { animation: none; }
+}
+
+/* Popular tier hover glow (7-day pass keeps its primary ring) */
+.tier-popular:hover {
+  box-shadow:
+    0 12px 40px oklch(0.72 0.16 165 / 0.16),
+    0 0 0 1px oklch(0.72 0.16 165 / 0.35);
+}
+
+/* ------------------------------------------------------------------ */
+/* Mood gauge — animated needle (SignalSection free teaser)            */
+/* ------------------------------------------------------------------ */
+.mood-needle {
+  transform-origin: 100px 88px; /* gauge centre — keep in sync with SVG */
+  transition: transform 1.1s cubic-bezier(0.34, 1.4, 0.44, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mood-needle { transition: none; }
+}
+@keyframes mood-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.mood-breathe { animation: mood-breathe 2.6s ease-in-out infinite; }
+
+/* Header elevation once the page scrolls (scroll-depth cue) */
+.header-scrolled {
+  box-shadow: 0 12px 32px oklch(0 0 0 / 0.35), 0 1px 0 oklch(0.5 0.05 210 / 0.12);
+}
+
+/* ------------------------------------------------------------------ */
 /* Reveal — scroll-triggered entrance (components/pengu/Reveal.tsx)    */
 /* ------------------------------------------------------------------ */
 .reveal {

@@ -79,6 +79,17 @@
       "momentum": "Price momentum & slope — the speed and direction of the recent move.",
       "volume": "Volume regime — trades vs their average; expansion confirms the move.",
       "srLevels": "Support & resistance — key levels where price previously reacted."
+    },
+    "nextSignal": "Next signal",
+    "nextSignalHint": "The engine publishes a fresh signal every day at 00:00 UTC",
+    "mood": {
+      "veryBullish": "Very bullish",
+      "bullish": "Bullish",
+      "neutral": "Neutral",
+      "bearish": "Bearish",
+      "veryBearish": "Very bearish",
+      "hint": "bull/bear balance across 11 indicators",
+      "desc": "This dial is computed from the consensus of 11 technical indicators; the final verdict (BUY/SELL/HOLD) stays pass-gated."
     }
   },
   "payment": {
@@ -155,7 +166,8 @@
       "sub30": "30-Day Subscription (legacy)"
     },
     "discount": "off",
-    "discountNote": "Longer passes cost less per day — up to 30% off"
+    "discountNote": "Longer passes cost less per day — up to 30% off",
+    "bestValue": "Best value"
   },
   "track": {
     "title": "Real Signal Track Record",
@@ -188,7 +200,8 @@
     "simTitle": "If you had followed the signals…",
     "simAmount": "Stake per signal",
     "simFinal": "Final value",
-    "simNote": "Simple math on the cumulative curve — fees & slippage not included."
+    "simNote": "Simple math on the cumulative curve — fees & slippage not included.",
+    "emptyTimeline": "Today's signal is live right now — the first evaluated outcome lands tomorrow, and this table fills day by day."
   },
   "engine": {
     "title": "Inside the Analysis Engine",

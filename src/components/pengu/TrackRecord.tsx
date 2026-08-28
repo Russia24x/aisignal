@@ -26,7 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calculator, ChevronLeft, History, Loader2, MousePointerClick, TrendingUp, Trophy } from "lucide-react";
+import { Calculator, Check, ChevronLeft, History, Loader2, MousePointerClick, TrendingUp, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 30;
@@ -193,6 +193,23 @@ export function TrackRecord() {
               </div>
               <p className="text-sm font-bold">🐧 {t("track.empty")}</p>
               <p className="mt-1 text-xs text-muted-foreground">{t("track.subtitle")}</p>
+
+              {/* honest mini-timeline: day 1 is live now, outcomes land one
+                  per day — shows the emptiness is by design, not a bug */}
+              <div className="mx-auto mt-7 flex max-w-[280px] items-center" aria-hidden>
+                <span className="size-2.5 shrink-0 rounded-full bg-primary pulse-ring" />
+                <span className="h-px flex-1 border-t border-dashed border-border/80" />
+                <span className="size-2.5 shrink-0 rounded-full border-2 border-muted-foreground/40" />
+                <span className="h-px flex-1 border-t border-dashed border-border/80" />
+                <span className="size-2.5 shrink-0 rounded-full border-2 border-muted-foreground/40" />
+                <span className="h-px flex-1 border-t border-dashed border-border/80" />
+                <span className="grid size-5 shrink-0 place-items-center rounded-full border border-hold/50 bg-hold/10 text-hold">
+                  <Check className="size-3" />
+                </span>
+              </div>
+              <p className="mt-3 text-[11px] leading-5 text-muted-foreground/80">
+                {t("track.emptyTimeline")}
+              </p>
             </div>
           ) : (
             <>

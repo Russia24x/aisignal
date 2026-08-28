@@ -22,6 +22,8 @@ import { useMarket, fmt } from "./useMarket";
 import { authFetch } from "@/lib/client-session";
 import { PaymentDialog, type PaymentProduct } from "./PaymentDialog";
 import { FactorList } from "./FactorList";
+import { MoodGauge } from "./MoodGauge";
+import { NextSignalCountdown } from "./NextSignalCountdown";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -128,19 +130,24 @@ export function SignalSection() {
               </p>
             )}
           </div>
-          {entitlements?.activeGrant && (
-            <Badge className="gap-1.5 bg-buy/15 px-3 py-1.5 text-buy ring-1 ring-buy/30">
-              <Sparkles className="size-3.5" />
-              {entitlements.activeGrant.lifetime ? (
-                <>{t("dashboard.lifetime")} ∞</>
-              ) : (
-                <>
-                  {t("signal.subscribed")} ·{" "}
-                  {new Date(entitlements.activeGrant.expiresAt).toLocaleDateString(locale === "fa" ? "fa-IR" : "en-US")}
-                </>
-              )}
-            </Badge>
-          )}
+          <div className="flex flex-col items-end gap-2">
+            {/* ticking urgency cue — the engine cuts the next signal at
+                00:00 UTC sharp */}
+            <NextSignalCountdown />
+            {entitlements?.activeGrant && (
+              <Badge className="gap-1.5 bg-buy/15 px-3 py-1.5 text-buy ring-1 ring-buy/30">
+                <Sparkles className="size-3.5" />
+                {entitlements.activeGrant.lifetime ? (
+                  <>{t("dashboard.lifetime")} ∞</>
+                ) : (
+                  <>
+                    {t("signal.subscribed")} ·{" "}
+                    {new Date(entitlements.activeGrant.expiresAt).toLocaleDateString(locale === "fa" ? "fa-IR" : "en-US")}
+                  </>
+                )}
+              </Badge>
+            )}
+          </div>
         </header>
 
         {authLoading ? (
@@ -160,33 +167,43 @@ export function SignalSection() {
         {/* free consensus teaser (always visible) */}
         {preview && !signal && (
           <div className="glass-card shimmer mt-6 p-5">
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-4 flex items-center justify-between">
               <span className="text-sm font-bold">{t("signal.consensus")}</span>
               <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground">
                 <Lock className="size-3" />
                 {t("signal.previewNote")}
               </Badge>
             </div>
-            <div className="relative h-3.5 overflow-hidden rounded-full bg-muted/60" dir="ltr">
-              <div className="absolute inset-0 flex">
-                <div
-                  className="bg-buy transition-all duration-500"
-                  style={{ width: `${(preview.consensus.bullish / preview.consensus.total) * 100}%` }}
-                />
-                <div
-                  className="bg-hold/60 transition-all duration-500"
-                  style={{ width: `${(preview.consensus.neutral / preview.consensus.total) * 100}%` }}
-                />
-                <div
-                  className="bg-sell transition-all duration-500"
-                  style={{ width: `${(preview.consensus.bearish / preview.consensus.total) * 100}%` }}
-                />
+            <div className="grid items-center gap-6 sm:grid-cols-[minmax(0,230px)_1fr]">
+              {/* mood dial — the consensus as one glanceable needle */}
+              <MoodGauge consensus={preview.consensus} />
+
+              <div>
+                <div className="relative h-3.5 overflow-hidden rounded-full bg-muted/60" dir="ltr">
+                  <div className="absolute inset-0 flex">
+                    <div
+                      className="bg-buy transition-all duration-500"
+                      style={{ width: `${(preview.consensus.bullish / preview.consensus.total) * 100}%` }}
+                    />
+                    <div
+                      className="bg-hold/60 transition-all duration-500"
+                      style={{ width: `${(preview.consensus.neutral / preview.consensus.total) * 100}%` }}
+                    />
+                    <div
+                      className="bg-sell transition-all duration-500"
+                      style={{ width: `${(preview.consensus.bearish / preview.consensus.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="mt-2 flex justify-between text-xs font-semibold" dir="ltr">
+                  <span className="text-buy">🐂 {preview.consensus.bullish} {t("signal.bullish")}</span>
+                  <span className="text-hold">≅ {preview.consensus.neutral} {t("signal.neutral")}</span>
+                  <span className="text-sell">🐻 {preview.consensus.bearish} {t("signal.bearish")}</span>
+                </div>
+                <p className="mt-3 text-[11px] leading-5 text-muted-foreground">
+                  {t("signal.mood.desc")}
+                </p>
               </div>
-            </div>
-            <div className="mt-2 flex justify-between text-xs font-semibold" dir="ltr">
-              <span className="text-buy">🐂 {preview.consensus.bullish} {t("signal.bullish")}</span>
-              <span className="text-hold">≅ {preview.consensus.neutral} {t("signal.neutral")}</span>
-              <span className="text-sell">🐻 {preview.consensus.bearish} {t("signal.bearish")}</span>
             </div>
           </div>
         )}
