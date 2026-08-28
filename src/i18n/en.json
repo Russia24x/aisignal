@@ -56,17 +56,16 @@
     "generatedAt": "Generated at",
     "candlesUsed": "candles analyzed",
     "connectFirst": "Connect your Abstract wallet to view the signal",
-    "needPlatform": "Platform access required",
-    "needPlatformDesc": "Pay the one-time 5 PENGU tariff to enter the signal dashboard.",
-    "needDayPass": "Today's signal is locked",
-    "needDayPassDesc": "Pay 1 PENGU to unlock today's signal, or activate a daily subscription.",
     "consensus": "Indicator consensus",
     "previewNote": "Free preview — full signal after payment",
     "locked": "Locked",
     "unlock": "Unlock",
     "subscribed": "Active subscription",
     "expires": "Expires",
-    "daysLeft": "days left"
+    "daysLeft": "days left",
+    "needPass": "Today's signal is locked",
+    "needPassDesc": "Registration is free; buy an access pass to unlock the daily signals.",
+    "viewPlans": "View all plans"
   },
   "payment": {
     "title": "Pay with PENGU",
@@ -96,27 +95,42 @@
     "payFromConnected": "Payment must be sent from the connected wallet ({address})."
   },
   "products": {
-    "platform": {
-      "name": "Platform Access",
-      "desc": "One-time — permanent dashboard access",
-      "price": "5 PENGU"
+    "choose": "Choose plan",
+    "freeTierNote": "Registration and browsing are free — only signals require an access pass",
+    "currentPlan": "Your current plan",
+    "dayUnit": "day",
+    "noExpiry": "Never expires",
+    "free": {
+      "name": "Free — Register & Browse",
+      "desc": "Wallet signup, live market, track record and your dashboard — without signal content",
+      "cta": "Free signup"
     },
-    "dayPass": {
-      "name": "Day Pass",
-      "desc": "Unlock today's signal until end of UTC day",
-      "price": "1 PENGU"
+    "pass1d": {
+      "name": "1-Day Pass",
+      "desc": "Full access to today's signal — 24 hours"
     },
-    "sub7": {
-      "name": "7-Day Subscription",
-      "desc": "1 PENGU per day — no daily payments needed",
-      "price": "7 PENGU"
+    "pass7d": {
+      "name": "7-Day Pass",
+      "desc": "One full week of daily signal access"
     },
-    "sub30": {
-      "name": "30-Day Subscription",
-      "desc": "1 PENGU per day — best value",
-      "price": "30 PENGU"
+    "pass30d": {
+      "name": "30-Day Pass",
+      "desc": "One full month — about 1 PENGU per day"
     },
-    "choose": "Choose plan"
+    "pass365d": {
+      "name": "1-Year Pass",
+      "desc": "One full year of access — best value"
+    },
+    "passLifetime": {
+      "name": "Lifetime Access",
+      "desc": "Forever — no renewals, no worries"
+    },
+    "legacy": {
+      "platform": "Platform Access (legacy)",
+      "dayPass": "Day Pass (legacy)",
+      "sub7": "7-Day Subscription (legacy)",
+      "sub30": "30-Day Subscription (legacy)"
+    }
   },
   "track": {
     "title": "Real Signal Track Record",
@@ -155,7 +169,11 @@
     "q3": "Are these signals financial advice?",
     "a3": "No. This is the output of technical-analysis algorithms on real data, for informational purposes only. Trade at your own risk.",
     "q4": "Why Abstract?",
-    "a4": "Abstract is an Ethereum L2 with negligible fees — the official home of the Pudgy Penguins ecosystem and the PENGU token. Where penguins live."
+    "a4": "Abstract is an Ethereum L2 with negligible fees — the official home of the Pudgy Penguins ecosystem and the PENGU token. Where penguins live.",
+    "q5": "Is registration free?",
+    "a5": "Yes! Signing up and browsing (live market, track record, dashboard) is completely free. You only need an access pass (from 5 PENGU for a week up to lifetime) to read the signal content.",
+    "q6": "Do you use session keys?",
+    "a6": "No. Payments are plain PENGU token transfers to the treasury address — no approvals, no permanent wallet access. Everything is verified fully on-chain."
   },
   "footer": {
     "disclaimer": "⚠️ Algorithmic analysis, not financial advice. Trading involves risk.",
@@ -191,15 +209,11 @@
   },
   "dashboard": {
     "title": "My Dashboard",
-    "subtitle": "Your access, payments, and subscription",
-    "subscription": "Subscription",
+    "subtitle": "Your access pass, payments and membership",
     "active": "Active",
-    "expired": "Expired",
     "expiresAt": "Expires",
     "daysLeft": "Days left",
-    "platformAccess": "Platform access",
     "lifetime": "Lifetime",
-    "since": "Since",
     "totalSpent": "Total spent",
     "recentPayments": "Recent payments",
     "noPayments": "No payments yet",
@@ -213,7 +227,14 @@
     "tier.2": "Silver",
     "tier.3": "Gold",
     "tier.4": "Platinum",
-    "tier.5": "Diamond"
+    "tier.5": "Diamond",
+    "pass": "Access Pass",
+    "membership": "Membership",
+    "memberSince": "Member since",
+    "paymentsCount": "Payments",
+    "freeTier": "Free tier",
+    "passHolder": "Pass holder",
+    "noPass": "No active pass"
   },
   "alerts": {
     "title": "Price Alerts",

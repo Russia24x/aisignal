@@ -3,8 +3,9 @@
  * Body: { txHash, product }
  *
  * Verifies the payment fully server-side against the Abstract RPC and
- * credits the authenticated user. See lib/modules/access/payments.ts
- * for the trust model.
+ * credits the authenticated user. Products are access passes defined in
+ * lib/modules/access/passes.ts. See lib/modules/access/payments.ts
+ * for the trust model (plain ERC-20 transfer, NO session keys).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -18,7 +19,7 @@ const log = createLogger("payment:verify");
 
 const bodySchema = z.object({
   txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "Invalid tx hash"),
-  product: z.enum(["PLATFORM_ACCESS", "DAY_PASS", "SUB_7", "SUB_30"]).or(z.string().regex(/^[A-Z0-9_]{2,32}$/)),
+  product: z.string().regex(/^[A-Z0-9_]{2,32}$/),
 });
 
 export async function POST(req: NextRequest) {

@@ -8,8 +8,14 @@
  *        token == PENGU contract
  *        to    == treasury address
  *        from  == the authenticated user's wallet
- *        value >= product price (in token base units)
+ *        value >= pass price (in token base units)
  *   3. the tx hash has not been credited before (replay protection)
+ *
+ * Session-key-free BY DESIGN: payments are plain ERC-20 transfers initiated
+ * by the user's own wallet — no approvals, no allowances, no session keys,
+ * so nothing here is subject to Abstract's session-key review policies.
+ * A future session-key autopay would observe its transfers through the same
+ * verifyAndCredit() pipeline (see docs/ACCESS-MODEL.md § Future).
  *
  * @module lib/modules/access/payments
  */
@@ -17,6 +23,7 @@ import { createPublicClient, http, type PublicClient, type Log } from "viem";
 import { serverConfig, publicConfig } from "@/lib/config";
 import { db } from "@/lib/db";
 import { createLogger } from "@/lib/logger";
+import { passById, LIFETIME_GRANT_DAYS } from "./passes";
 
 const log = createLogger("payments");
 
@@ -41,7 +48,11 @@ export interface TransferCheck {
 }
 
 /** Inspect a receipt for a qualifying PENGU transfer to the treasury. */
-async function inspectTransfer(txHash: string, expectedFrom?: string, minAmountRaw?: bigint): Promise<TransferCheck> {
+async function inspectTransfer(
+  txHash: string,
+  expectedFrom?: string,
+  minAmountRaw?: bigint,
+): Promise<TransferCheck> {
   let receipt;
   try {
     receipt = await rpc().getTransactionReceipt({ hash: txHash as `0x${string}` });
@@ -90,8 +101,11 @@ export interface VerifyPaymentResult {
 }
 
 /**
- * Full payment verification + crediting pipeline.
- * Product prices come from config; grants are created here.
+ * Full payment verification + crediting pipeline for access passes.
+ *
+ * Every product is a time pass: the grant extends from the later of
+ * (now, current active expiry) so early renewals never lose paid days.
+ * PASS_LIFETIME grants ≈100 years — practically forever.
  */
 export async function verifyAndCredit(params: {
   txHash: string;
@@ -103,6 +117,9 @@ export async function verifyAndCredit(params: {
   const normalized = txHash.toLowerCase();
 
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) return { ok: false, error: "INVALID_TX_HASH" };
+
+  const pass = passById(product);
+  if (!pass) return { ok: false, error: "UNKNOWN_PRODUCT" };
 
   // replay protection
   const existing = await db.payment.findUnique({ where: { txHash: normalized } });
@@ -120,6 +137,7 @@ export async function verifyAndCredit(params: {
 
   // record payment + grant access atomically
   const now = new Date();
+  const grantDays = pass.days ?? LIFETIME_GRANT_DAYS;
   const result = await db.$transaction(async (tx) => {
     // double-check uniqueness inside the transaction
     const dupe = await tx.payment.findUnique({ where: { txHash: normalized } });
@@ -141,41 +159,21 @@ export async function verifyAndCredit(params: {
       },
     });
 
-    if (product === "PLATFORM_ACCESS") {
-      await tx.user.update({
-        where: { id: user.id },
-        data: { platformAccessAt: user.platformAccessAt ?? now },
-      });
-    } else if (product === "DAY_PASS") {
-      // valid until end of the current UTC day + 2h grace
-      const dayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 2, 0, 0));
-      await tx.accessGrant.create({
-        data: {
-          userId: user.id,
-          product: "DAY_PASS",
-          startsAt: now,
-          expiresAt: dayEnd,
-          sourcePaymentId: payment.id,
-        },
-      });
-    } else {
-      // subscription pack — extends from the later of (now, current expiry)
-      const active = await tx.accessGrant.findFirst({
-        where: { userId: user.id, product: "SUBSCRIPTION", expiresAt: { gt: now } },
-        orderBy: { expiresAt: "desc" },
-      });
-      const packDays = serverConfig.subscriptionPacks.find((p) => p.id === product)?.days ?? 0;
-      const base = active ? active.expiresAt : now;
-      await tx.accessGrant.create({
-        data: {
-          userId: user.id,
-          product: "SUBSCRIPTION",
-          startsAt: now,
-          expiresAt: new Date(base.getTime() + packDays * 24 * 3600 * 1000),
-          sourcePaymentId: payment.id,
-        },
-      });
-    }
+    // all passes stack: extend from the later of (now, current expiry)
+    const active = await tx.accessGrant.findFirst({
+      where: { userId: user.id, expiresAt: { gt: now } },
+      orderBy: { expiresAt: "desc" },
+    });
+    const base = active ? active.expiresAt : now;
+    await tx.accessGrant.create({
+      data: {
+        userId: user.id,
+        product,
+        startsAt: now,
+        expiresAt: new Date(base.getTime() + grantDays * 24 * 3600 * 1000),
+        sourcePaymentId: payment.id,
+      },
+    });
     return payment;
   });
 

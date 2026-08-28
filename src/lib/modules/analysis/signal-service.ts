@@ -118,10 +118,14 @@ export async function evaluateOpenSignals(): Promise<number> {
   return updated;
 }
 
-/** Public track record (no auth) — proves the engine's real performance. */
+/** Public track record (no auth) — proves the engine's real performance.
+ *  NEVER includes today's signal: the current day's action is the paid
+ *  product and must not leak through the free track record. */
 export async function getSignalHistory(limit = 30): Promise<{ items: SignalHistoryItem[]; stats: Record<string, number> }> {
   await evaluateOpenSignals();
+  const today = new Date().toISOString().slice(0, 10);
   const rows = await db.signal.findMany({
+    where: { day: { lt: today } },
     orderBy: { day: "desc" },
     take: limit,
   });

@@ -16,17 +16,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAccount, useSignMessage } from "wagmi";
 import { useLoginWithAbstract } from "@abstract-foundation/agw-react";
 import { createLogger } from "@/lib/client-logger";
+import type { EntitlementsDTO as Entitlements } from "@/lib/modules/access/passes";
 
 const log = createLogger("auth");
 
-export interface Entitlements {
-  authenticated: boolean;
-  address: string | null;
-  platformAccess: boolean;
-  signalAccess: boolean;
-  activeGrant: { product: "DAY_PASS" | "SUBSCRIPTION"; expiresAt: string } | null;
-  subscriptionDaysLeft: number;
-}
+export type { Entitlements };
 
 interface SessionState {
   loading: boolean;

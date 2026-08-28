@@ -3,18 +3,17 @@
 /**
  * MyDashboard — per-user dashboard section.
  *
- * Visible ONLY to authenticated users who hold platform access
- * (paid the one-time 5 PENGU tariff). Renders `null` for everyone else,
- * so the section is invisible for visitors and connected-but-not-paid
- * users — the page flow remains unchanged for them.
+ * Visible to ALL authenticated users since the v2 access model (entry and
+ * browsing are free). Renders `null` for visitors — the page flow for them
+ * stays unchanged.
  *
  * Sits between the Signal section and the Pricing section. Shows:
- *   1. Subscription status (active / expired + days-left progress bar)
- *   2. Platform access (since when, "lifetime" label)
+ *   1. Access pass status (active / none + days-left progress bar, ∞ for lifetime)
+ *   2. Membership (member since, payments count, account tier)
  *   3. Total spent in PENGU (large mono number)
  *   4. Recent payments (last 5, scrollable, links to explorer)
  *
- * Data source: GET /api/me/dashboard (auth + platform-access gated).
+ * Data source: GET /api/me/dashboard (auth-gated).
  *
  * @module components/pengu/MyDashboard
  */
@@ -25,6 +24,7 @@ import { useAbstractProfile } from "@/hooks/useAbstractProfile";
 import { getTierColor } from "@/lib/abstract/profile";
 import { AbstractProfile } from "@/components/abstract/AbstractProfile";
 import { publicConfig } from "@/lib/public-config";
+import type { EntitlementsDTO } from "@/lib/modules/access/passes";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -45,28 +45,23 @@ import {
   Medal,
   RefreshCw,
   Sparkles,
+  UserRound,
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* --------------------------- types --------------------------- */
 
-interface DashboardEntitlements {
-  authenticated: boolean;
-  address: string | null;
-  platformAccess: boolean;
-  signalAccess: boolean;
-  activeGrant: { product: "DAY_PASS" | "SUBSCRIPTION"; expiresAt: string } | null;
-  subscriptionDaysLeft: number;
-}
+type DashboardEntitlements = EntitlementsDTO;
 
 interface DashboardActiveGrant {
-  product: "DAY_PASS" | "SUBSCRIPTION";
+  product: string;
   startsAt: string;
   expiresAt: string;
   daysLeft: number;
   totalDays: number;
   progressPercent: number;
+  lifetime: boolean;
 }
 
 interface DashboardPayment {
@@ -81,7 +76,8 @@ interface DashboardData {
   entitlements: DashboardEntitlements;
   activeGrant: DashboardActiveGrant | null;
   payments: DashboardPayment[];
-  platformAccessAt: string | null;
+  memberSince: string;
+  paymentsCount: number;
   daysLeft: number;
   totalSpentPengu: number;
 }
@@ -89,10 +85,18 @@ interface DashboardData {
 /* --------------------------- helpers --------------------------- */
 
 const PRODUCT_LABEL_KEY: Record<string, string> = {
-  PLATFORM_ACCESS: "products.platform.name",
-  DAY_PASS: "products.dayPass.name",
-  SUB_7: "products.sub7.name",
-  SUB_30: "products.sub30.name",
+  // v2 access passes
+  PASS_1D: "products.pass1d.name",
+  PASS_7D: "products.pass7d.name",
+  PASS_30D: "products.pass30d.name",
+  PASS_365D: "products.pass365d.name",
+  PASS_LIFETIME: "products.passLifetime.name",
+  // legacy (pre-v2) products — kept so old payment rows stay readable
+  LEGACY_PLATFORM: "products.legacy.platform",
+  PLATFORM_ACCESS: "products.legacy.platform",
+  DAY_PASS: "products.legacy.dayPass",
+  SUB_7: "products.legacy.sub7",
+  SUB_30: "products.legacy.sub30",
 };
 
 function shortAddr(a: string): string {
@@ -104,14 +108,8 @@ function shortTx(h: string): string {
 }
 
 function productLabel(t: (k: string) => string, product: string): string {
-  return t(PRODUCT_LABEL_KEY[product] ?? "products.platform.name");
-}
-
-function grantProductLabel(
-  t: (k: string) => string,
-  product: "DAY_PASS" | "SUBSCRIPTION",
-): string {
-  return product === "DAY_PASS" ? t("products.dayPass.name") : t("dashboard.subscription");
+  const key = PRODUCT_LABEL_KEY[product];
+  return key ? t(key) : product;
 }
 
 function formatDate(iso: string, locale: Locale): string {
@@ -161,7 +159,7 @@ export function MyDashboard() {
   const queryClient = useQueryClient();
   const { entitlements, loading: authLoading } = useAuth();
 
-  const enabled = !!entitlements?.authenticated && !!entitlements?.platformAccess;
+  const enabled = !!entitlements?.authenticated;
 
   const query = useQuery<DashboardData>({
     queryKey: ["me-dashboard", entitlements?.address],
@@ -179,7 +177,8 @@ export function MyDashboard() {
   const profileQuery = useAbstractProfile();
   const portalProfile = profileQuery.data ?? null;
 
-  // hard gate: render nothing for visitors / connected-but-not-paid users
+  // hard gate: render nothing for visitors (connected-but-unauthenticated
+  // users see the sign-in CTA in the Signal section instead)
   if (!enabled || authLoading) return null;
 
   const dashboard = query.data ?? null;
@@ -254,7 +253,7 @@ export function MyDashboard() {
             t={t}
             locale={locale}
           />
-          <PlatformAccessCard
+          <MembershipCard
             dashboard={dashboard}
             loading={loading}
             t={t}
@@ -418,7 +417,7 @@ function SubscriptionCard({
   const active = !!grant;
 
   return (
-    <CardShell icon={<CalendarClock className="size-4" />} title={t("dashboard.subscription")}>
+    <CardShell icon={<CalendarClock className="size-4" />} title={t("dashboard.pass")}>
       {loading ? (
         <div className="space-y-2">
           <Skeleton className="h-6 w-24" />
@@ -438,21 +437,25 @@ function SubscriptionCard({
               )}
             >
               {active ? <CheckCircle2 className="size-3" /> : <CalendarClock className="size-3" />}
-              {active ? t("dashboard.active") : t("dashboard.expired")}
+              {active ? t("dashboard.active") : t("dashboard.noPass")}
             </Badge>
             <span className="text-[11px] text-muted-foreground">
-              {grant ? grantProductLabel(t, grant.product) : t("dashboard.notAvailable")}
+              {grant ? productLabel(t, grant.product) : t("dashboard.freeTier")}
             </span>
           </div>
 
           <div className="mt-3 text-xs text-muted-foreground">
-            {t("dashboard.expiresAt")}
+            {grant?.lifetime ? t("products.noExpiry") : t("dashboard.expiresAt")}
             <div className="mt-0.5 font-mono text-sm font-bold" dir="ltr">
-              {grant ? formatDate(grant.expiresAt, locale) : t("dashboard.notAvailable")}
+              {grant
+                ? grant.lifetime
+                  ? "∞"
+                  : formatDate(grant.expiresAt, locale)
+                : t("dashboard.notAvailable")}
             </div>
           </div>
 
-          {active && grant && (
+          {active && grant && !grant.lifetime && (
             <div className="mt-3">
               <div className="mb-1.5 flex items-center justify-between text-[11px]">
                 <span className="text-muted-foreground">{t("dashboard.daysLeft")}</span>
@@ -469,7 +472,7 @@ function SubscriptionCard({
   );
 }
 
-function PlatformAccessCard({
+function MembershipCard({
   dashboard,
   loading,
   t,
@@ -480,10 +483,12 @@ function PlatformAccessCard({
   t: TFunc;
   locale: Locale;
 }) {
-  const since = dashboard?.platformAccessAt ?? null;
+  const since = dashboard?.memberSince ?? null;
+  const count = dashboard?.paymentsCount ?? 0;
+  const holder = !!dashboard?.activeGrant;
 
   return (
-    <CardShell icon={<CheckCircle2 className="size-4" />} title={t("dashboard.platformAccess")}>
+    <CardShell icon={<UserRound className="size-4" />} title={t("dashboard.membership")}>
       {loading ? (
         <div className="space-y-2">
           <Skeleton className="h-6 w-20" />
@@ -492,20 +497,33 @@ function PlatformAccessCard({
       ) : (
         <>
           <div className="flex items-center gap-2">
-            <span className="grid size-9 place-items-center rounded-full bg-buy/15 text-buy ring-1 ring-buy/30">
-              <CheckCircle2 className="size-5" />
+            <span
+              className={cn(
+                "grid size-9 place-items-center rounded-full ring-1",
+                holder ? "bg-buy/15 text-buy ring-buy/30" : "bg-muted/50 text-muted-foreground ring-border",
+              )}
+            >
+              {holder ? <CheckCircle2 className="size-5" /> : <UserRound className="size-5" />}
             </span>
-            <Badge className="bg-buy/15 px-2 py-0.5 font-black text-buy ring-1 ring-buy/30">
-              {t("dashboard.lifetime")}
+            <Badge
+              className={cn(
+                "px-2 py-0.5 font-black",
+                holder ? "bg-buy/15 text-buy ring-1 ring-buy/30" : "bg-muted text-muted-foreground ring-1 ring-border",
+              )}
+            >
+              {holder ? t("dashboard.passHolder") : t("dashboard.freeTier")}
             </Badge>
           </div>
 
           <div className="mt-3 text-xs text-muted-foreground">
-            {t("dashboard.since")}
+            {t("dashboard.memberSince")}
             <div className="mt-0.5 font-mono text-sm font-bold" dir="ltr">
               {since ? formatDate(since, locale) : t("dashboard.notAvailable")}
             </div>
           </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {t("dashboard.paymentsCount")}: <span className="font-mono font-bold" dir="ltr">{count}</span>
+          </p>
         </>
       )}
     </CardShell>

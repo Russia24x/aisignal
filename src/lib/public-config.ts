@@ -16,8 +16,6 @@ export const publicConfig = {
   explorerUrl: process.env.NEXT_PUBLIC_EXPLORER_URL || "https://abscan.org",
   penguToken: (process.env.NEXT_PUBLIC_PENGU_TOKEN || "0x9eBe3A824Ca958e4b3Da772D2065518F009CBa62").toLowerCase() as `0x${string}`,
   treasury: (process.env.NEXT_PUBLIC_TREASURY || "0x60Df4E186364c3a49A550Aee29Da1d5fe3658818").toLowerCase() as `0x${string}`,
-  pricePlatformAccess: num(process.env.NEXT_PUBLIC_PRICE_PLATFORM_ACCESS, 5),
-  priceDayPass: num(process.env.NEXT_PUBLIC_PRICE_DAY_PASS, 1),
   defaultLocale: process.env.NEXT_PUBLIC_DEFAULT_LOCALE || "fa",
   supportedLocales: (process.env.NEXT_PUBLIC_SUPPORTED_LOCALES || "fa,en").split(","),
 } as const;

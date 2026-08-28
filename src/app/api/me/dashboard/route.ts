@@ -1,18 +1,21 @@
 /**
- * GET /api/me/dashboard — per-user dashboard summary (subscription,
- * payments, platform access) for authenticated, platform-access-holding
- * users. Returns 401 if not authenticated, 403 if no platform access.
+ * GET /api/me/dashboard — per-user dashboard summary (access pass status,
+ * payments, membership) for any AUTHENTICATED user. Entry and browsing are
+ * free since the v2 access model; signal content itself stays server-gated.
+ * Returns 401 if not authenticated.
  *
  * Response shape:
  *   {
  *     ok: true,
  *     dashboard: {
  *       entitlements,            // full Entitlements object
- *       activeGrant: {           // null if no active grant
- *         product, startsAt, expiresAt, daysLeft, totalDays, progressPercent
+ *       activeGrant: {           // null if no active pass
+ *         product, startsAt, expiresAt, daysLeft, totalDays,
+ *         progressPercent, lifetime
  *       } | null,
  *       payments: [...last5],    // { txHash, product, amountToken, status, verifiedAt }
- *       platformAccessAt: string | null,
+ *       memberSince: string,     // account creation date
+ *       paymentsCount: number,   // total verified payments
  *       daysLeft: number,
  *       totalSpentPengu: number,
  *     }
@@ -24,6 +27,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/security/rate-limit";
 import { getSession } from "@/lib/security/session";
 import { getEntitlements } from "@/lib/modules/access/entitlements";
+import { isLifetimePass, LIFETIME_GRANT_DAYS } from "@/lib/modules/access/passes";
 import { db } from "@/lib/db";
 
 // never cache a per-user dashboard response
@@ -40,10 +44,6 @@ export async function GET(req: NextRequest) {
 
   const entitlements = await getEntitlements(session.sub);
 
-  if (!entitlements.platformAccess) {
-    return NextResponse.json({ ok: false, error: "PLATFORM_ACCESS_REQUIRED" }, { status: 403 });
-  }
-
   const now = new Date();
 
   // Active grant (the most-recently expiring one). We re-fetch it directly
@@ -54,6 +54,7 @@ export async function GET(req: NextRequest) {
     orderBy: { expiresAt: "desc" },
   });
 
+  const lifetime = grant ? isLifetimePass(grant.product) : false;
   const totalDays = grant
     ? Math.max(1, Math.round((grant.expiresAt.getTime() - grant.startsAt.getTime()) / (24 * 3600 * 1000)))
     : 0;
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest) {
     ? Math.max(0, Math.min(100, (daysLeft / totalDays) * 100))
     : 0;
 
-  const [payments, spentAgg, user] = await Promise.all([
+  const [payments, spentAgg, countAgg, user] = await Promise.all([
     db.payment.findMany({
       where: { userId: session.sub, status: "VERIFIED" },
       orderBy: { verifiedAt: "desc" },
@@ -74,9 +75,12 @@ export async function GET(req: NextRequest) {
       _sum: { amountToken: true },
       where: { userId: session.sub, status: "VERIFIED" },
     }),
+    db.payment.count({
+      where: { userId: session.sub, status: "VERIFIED" },
+    }),
     db.user.findUnique({
       where: { id: session.sub },
-      select: { platformAccessAt: true },
+      select: { createdAt: true },
     }),
   ]);
 
@@ -87,12 +91,13 @@ export async function GET(req: NextRequest) {
         entitlements,
         activeGrant: grant
           ? {
-              product: grant.product as "DAY_PASS" | "SUBSCRIPTION",
+              product: grant.product,
               startsAt: grant.startsAt.toISOString(),
               expiresAt: grant.expiresAt.toISOString(),
               daysLeft,
-              totalDays,
+              totalDays: lifetime ? LIFETIME_GRANT_DAYS : totalDays,
               progressPercent,
+              lifetime,
             }
           : null,
         payments: payments.map((p) => ({
@@ -102,7 +107,8 @@ export async function GET(req: NextRequest) {
           status: p.status,
           verifiedAt: p.verifiedAt.toISOString(),
         })),
-        platformAccessAt: user?.platformAccessAt ? user.platformAccessAt.toISOString() : null,
+        memberSince: (user?.createdAt ?? new Date()).toISOString(),
+        paymentsCount: countAgg,
         daysLeft,
         totalSpentPengu: spentAgg._sum.amountToken ?? 0,
       },

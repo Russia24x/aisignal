@@ -4,14 +4,13 @@
  * SignalSection — the product.
  *
  * State machine (server-driven via /api/auth/session entitlements):
- *   not connected      → connect CTA
- *   not authenticated   → sign-message CTA
- *   no platform access  → 5 PENGU platform tariff CTA
- *   no active grant     → 1 PENGU day pass / subscription CTA
- *   access granted      → full signal card
+ *   not connected / not authenticated → connect CTA
+ *   no active pass                    → locked preview + pass CTA
+ *   active pass (any PASS_* tier)      → full signal card
  *
  * The free layer always shows the live consensus teaser so visitors can
- * verify the engine is real before paying.
+ * verify the engine is real before paying. Entry and browsing are free
+ * (v2 access model) — only signal CONTENT requires an access pass.
  *
  * @module components/pengu/SignalSection
  */
@@ -31,7 +30,6 @@ import {
   ArrowUpToLine,
   Brain,
   Calendar,
-  Coins,
   Gauge,
   Info,
   Loader2,
@@ -94,7 +92,7 @@ export function SignalSection() {
   const { data: market } = useMarket();
   const [product, setProduct] = useState<PaymentProduct | null>(null);
 
-  const hasAccess = entitlements?.signalAccess && entitlements?.platformAccess;
+  const hasAccess = !!entitlements?.signalAccess;
 
   // free preview (public)
   const previewQuery = useQuery({
@@ -109,9 +107,9 @@ export function SignalSection() {
   });
   const preview = previewQuery.data ?? null;
 
-  // paid signal (entitlement-gated)
+  // paid signal (pass-gated)
   const signalQuery = useQuery({
-    queryKey: ["signal-today", entitlements?.signalAccess, entitlements?.platformAccess],
+    queryKey: ["signal-today", entitlements?.signalAccess],
     queryFn: async (): Promise<{ signal: FullSignal } | { error: string }> => {
       const res = await fetch("/api/signal/today", { cache: "no-store" });
       const data = await res.json();
@@ -143,8 +141,14 @@ export function SignalSection() {
           {entitlements?.activeGrant && (
             <Badge className="gap-1.5 bg-buy/15 px-3 py-1.5 text-buy ring-1 ring-buy/30">
               <Sparkles className="size-3.5" />
-              {t("signal.subscribed")} ·{" "}
-              {new Date(entitlements.activeGrant.expiresAt).toLocaleDateString(locale === "fa" ? "fa-IR" : "en-US")}
+              {entitlements.activeGrant.lifetime ? (
+                <>{t("dashboard.lifetime")} ∞</>
+              ) : (
+                <>
+                  {t("signal.subscribed")} ·{" "}
+                  {new Date(entitlements.activeGrant.expiresAt).toLocaleDateString(locale === "fa" ? "fa-IR" : "en-US")}
+                </>
+              )}
             </Badge>
           )}
         </header>
@@ -153,10 +157,8 @@ export function SignalSection() {
           <Skeleton className="h-80 w-full rounded-2xl" />
         ) : !entitlements?.authenticated ? (
           <ConnectGate />
-        ) : !entitlements.platformAccess ? (
-          <PlatformGate onPay={() => setProduct({ id: "PLATFORM_ACCESS", name: t("products.platform.name"), pricePengu: 5 })} />
         ) : !hasAccess ? (
-          <DayPassGate onPay={(id, name, price) => setProduct({ id, name, pricePengu: price })} />
+          <PassGate onPay={(id, name, price) => setProduct({ id, name, pricePengu: price })} />
         ) : signal ? (
           <FullSignalCard signal={signal} locale={locale} />
         ) : signalError ? (
@@ -232,81 +234,36 @@ function ConnectGate() {
   );
 }
 
-function PlatformGate({ onPay }: { onPay: () => void }) {
-  const { t } = useI18n();
-  return (
-    <GateShell
-      icon={<Coins className="size-8" />}
-      title={t("signal.needPlatform")}
-      desc={t("signal.needPlatformDesc")}
-      price="5 PENGU"
-      onPay={onPay}
-      cta={t("products.choose")}
-    />
-  );
-}
-
-function DayPassGate({ onPay }: { onPay: (id: string, name: string, price: number) => void }) {
+function PassGate({ onPay }: { onPay: (id: string, name: string, price: number) => void }) {
   const { t } = useI18n();
   return (
     <div className="glass-card flex flex-col items-center gap-5 px-6 py-12 text-center">
       <span className="grid size-16 place-items-center rounded-2xl bg-hold/15 text-hold ring-2 ring-hold/30">
         <Lock className="size-8" />
       </span>
-      <p className="max-w-md text-lg font-bold">{t("signal.needDayPass")}</p>
-      <p className="max-w-md text-sm text-muted-foreground">{t("signal.needDayPassDesc")}</p>
+      <p className="max-w-md text-lg font-bold">{t("signal.needPass")}</p>
+      <p className="max-w-md text-sm text-muted-foreground">{t("signal.needPassDesc")}</p>
       <div className="flex flex-wrap items-center justify-center gap-3">
-        <Button onClick={() => onPay("DAY_PASS", t("products.dayPass.name"), 1)} size="lg" className="gap-2 font-bold">
+        <Button onClick={() => onPay("PASS_7D", t("products.pass7d.name"), 5)} size="lg" className="gap-2 font-bold">
           <Sparkles className="size-5" />
-          {t("products.dayPass.name")} — 1 PENGU
+          {t("products.pass7d.name")} — 5 PENGU
         </Button>
         <Button
-          onClick={() => onPay("SUB_7", t("products.sub7.name"), 7)}
+          onClick={() => onPay("PASS_30D", t("products.pass30d.name"), 30)}
           size="lg"
           variant="outline"
           className="gap-2 font-bold"
         >
           <Calendar className="size-5" />
-          {t("products.sub7.name")} — 7 PENGU
-        </Button>
-        <Button
-          onClick={() => onPay("SUB_30", t("products.sub30.name"), 30)}
-          size="lg"
-          variant="outline"
-          className="gap-2 font-bold"
-        >
-          <Calendar className="size-5" />
-          {t("products.sub30.name")} — 30 PENGU
+          {t("products.pass30d.name")} — 30 PENGU
         </Button>
       </div>
-    </div>
-  );
-}
-
-function GateShell({
-  icon,
-  title,
-  desc,
-  price,
-  onPay,
-  cta,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
-  price: string;
-  onPay: () => void;
-  cta: string;
-}) {
-  return (
-    <div className="glass-card flex flex-col items-center gap-5 px-6 py-14 text-center">
-      <span className="grid size-16 place-items-center rounded-2xl bg-primary/15 text-primary ring-2 ring-primary/30">{icon}</span>
-      <p className="max-w-md text-lg font-bold">{title}</p>
-      <p className="max-w-md text-sm text-muted-foreground">{desc}</p>
-      <Button onClick={onPay} size="lg" className="gap-2 px-8 font-bold">
-        <Coins className="size-5" />
-        {cta} — {price}
-      </Button>
+      <a
+        href="#pricing"
+        className="text-xs font-semibold text-primary underline-offset-4 hover:underline"
+      >
+        {t("signal.viewPlans")} →
+      </a>
     </div>
   );
 }

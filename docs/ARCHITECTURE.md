@@ -97,9 +97,11 @@ Candles (90d) ──► ۱۱ ارزیاب مستقل ──► score ∈ [-1,+1]
 ```
 
 **محصولات و دسترسی:**
-- `PLATFORM_ACCESS` (۵ PENGU): `User.platformAccessAt` — دائمی
-- `DAY_PASS` (۱ PENGU): grant تا پایان روز UTC + ۲ ساعت مهلت
-- `SUB_7`/`SUB_30`: grant تمدیدشونده (از انتهای اشتراک فعلی یا اکنون)
+- پاس‌های دسترسی v2 (بدون Session Key — جزئیات: `ACCESS-MODEL.md`):
+  `PASS_1D` (۱۰ پنگو/۱ روز)، `PASS_7D` (۵/۷ روز)، `PASS_30D` (۳۰/۳۰ روز)،
+  `PASS_365D` (۱۰۰/۳۶۵ روز)، `PASS_LIFETIME` (۱۵۰۰/∞) — همه grant تمدیدشونده
+  (از انتهای پاس فعلی یا اکنون). ورود و مرور رایگان است؛ فقط محتوای سیگنال
+  نیاز به پاس فعال دارد. منبع واحد: `src/lib/modules/access/passes.ts`
 
 ### ۴. ارزیابی عملکرد (Track Record)
 

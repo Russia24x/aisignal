@@ -421,3 +421,57 @@ Stage Summary:
   memory pressure after command exit; REST fallback covers this in preview
 - Next candidates: session keys autopay, sponsored transactions, Abstract App Voting,
   AI agents resources (llms.txt/SKILL.MD) for future AI features
+
+---
+Task ID: 11
+Agent: main
+Task: v2 access model — session-key-free tariff (10/1d, 5/7d, 30/30d, 100/1y, 1500 lifetime), free registration/browsing, strict content gating, docs overhaul
+
+Work Log:
+- User decision: stay OUTSIDE Abstract's session-key review policies → keep
+  payments as plain ERC-20 transfers (no approvals, no allowances, no session keys)
+- Created src/lib/modules/access/passes.ts — single source of truth for the
+  tariff, importable by client AND server (replaces 3 env vars + parsePacks):
+  PASS_1D 10, PASS_7D 5, PASS_30D 30, PASS_365D 100, PASS_LIFETIME 1500
+- entitlements.ts v2: entry/browsing FREE for any authenticated user;
+  signalAccess = active pass; lifetime flag; catalog built from passes.ts
+- payments.ts v2: single unified crediting path — all passes stack from
+  max(now, current expiry); LIFETIME = 36500-day grant; passById validation
+- API: payment/verify (pass ids only), signal/today single 402 gate
+  (need: ACCESS_PASS), me/dashboard open to all authenticated users
+  (+ memberSince, paymentsCount, lifetime)
+- SECURITY FIX (real leak found): getSignalHistory included TODAY's signal
+  in the public track record → today's BUY/SELL action was readable for
+  free. Fixed: WHERE day < today. Track record still proves past performance.
+- Frontend: PricingSection → 6 cards (free + 5 passes, prices from catalog,
+  per-day hints, best-value badge, current-plan state); SignalSection →
+  single PassGate (7d/30d CTAs + view-plans link); MyDashboard → PassCard +
+  MembershipCard (member since, payments count, free/pass-holder tier);
+  Header lock state now keyed on signalAccess
+- i18n (fa+en): products rewritten (5 passes + free), new FAQ entries
+  (free registration? session keys?), dashboard keys, legacy product labels
+- Legacy migration: scripts/migrate-legacy-access.ts (idempotent) —
+  platformAccessAt holders without grants get 30-day LEGACY_PLATFORM grant;
+  ran on dev DB: 1 user granted until 2026-09-27
+- Config cleanup: removed PRICE_PLATFORM_ACCESS / PRICE_DAY_PASS /
+  SUBSCRIPTION_PACKS from schema + .env + .env.example (+ DEPLOYMENT.md)
+- Docs: NEW docs/ACCESS-MODEL.md (tariff, payment trust model, endpoint
+  gating matrix, legacy migration, future session-key path — the architecture
+  is session-key-ready: verifyAndCredit is the single crediting entry);
+  README tariff table v2; ARCHITECTURE.md updated
+- QA: lint clean, tsc clean, agent-browser E2E — pricing renders exactly
+  0/10/5/30/100/1500, FAQ new Q&As, mobile no-overflow (390px), desktop
+  3-col grid, live ticker real price ($0.00933), signal/today 401 unauth,
+  preview masked (action:null), history today-excluded verified
+
+Stage Summary:
+- Feasibility answer to user: YES — implemented. Payments were already
+  session-key-free (tx-hash verification); v2 removes the platform paywall
+  and simplifies the catalog to one dimension (duration)
+- Tariff exactly as specified; prices in ONE file (passes.ts) — note for
+  owner: 7-day (5 PENGU total) is cheaper than 1-day (10); intentional
+  decoy/hook per ACCESS-MODEL.md §6, trivially adjustable
+- Content protection hardened (today's action no longer leaks via history);
+  all gating server-side
+- Future session keys: documented path, zero current code, verifyAndCredit
+  is the single integration point

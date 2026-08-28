@@ -3,8 +3,11 @@
  *
  * Requires:
  *  1. valid session (wallet signature auth)
- *  2. platform access (5 PENGU one-time tariff)
- *  3. active day pass or subscription (1 PENGU/day)
+ *  2. an active access pass (any PASS_* tier; see lib/modules/access/passes.ts)
+ *
+ * Content protection: signal details are NEVER sent to clients without an
+ * active pass. Non-entitled users get a 402 + use the free /api/signal/preview
+ * teaser (consensus counts only, no action/levels/reasoning).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/security/rate-limit";
@@ -22,11 +25,8 @@ export async function GET(req: NextRequest) {
   }
 
   const ent = await getEntitlements(session.sub);
-  if (!ent.platformAccess) {
-    return NextResponse.json({ ok: false, error: "PAYMENT_REQUIRED", need: "PLATFORM_ACCESS" }, { status: 402 });
-  }
   if (!ent.signalAccess) {
-    return NextResponse.json({ ok: false, error: "PAYMENT_REQUIRED", need: "DAY_PASS" }, { status: 402 });
+    return NextResponse.json({ ok: false, error: "PAYMENT_REQUIRED", need: "ACCESS_PASS" }, { status: 402 });
   }
 
   try {

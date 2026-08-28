@@ -48,9 +48,8 @@ NEXT_PUBLIC_RPC_URL = "https://api.mainnet.abs.xyz"
 NEXT_PUBLIC_EXPLORER_URL = "https://abscan.org"
 NEXT_PUBLIC_PENGU_TOKEN = "0x9eBe3A824Ca958e4b3Da772D2065518F009CBa62"
 NEXT_PUBLIC_TREASURY = "0x60Df4E186364c3a49A550Aee29Da1d5fe3658818"
-PRICE_PLATFORM_ACCESS = "5"
-PRICE_DAY_PASS = "1"
-SUBSCRIPTION_PACKS = "sub7:7:7,sub30:30:30"
+# Tariff lives in src/lib/modules/access/passes.ts (no env vars needed).
+# After first v2 deploy, run once: bun scripts/migrate-legacy-access.ts
 MARKET_CACHE_TTL_MS = "60000"
 HISTORY_CACHE_TTL_MS = "900000"
 RATE_LIMIT_PUBLIC = "60/60000"
