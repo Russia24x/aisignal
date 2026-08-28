@@ -41,6 +41,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { passById } from "@/lib/modules/access/passes";
 
 interface FullSignal {
   action: "BUY" | "SELL" | "HOLD";
@@ -236,6 +237,10 @@ function ConnectGate() {
 
 function PassGate({ onPay }: { onPay: (id: string, name: string, price: number) => void }) {
   const { t } = useI18n();
+  // prices come from the shared catalog (lib/modules/access/passes.ts) —
+  // the same source the server verifies payments against
+  const week = passById("PASS_7D")!;
+  const month = passById("PASS_30D")!;
   return (
     <div className="glass-card flex flex-col items-center gap-5 px-6 py-12 text-center">
       <span className="grid size-16 place-items-center rounded-2xl bg-hold/15 text-hold ring-2 ring-hold/30">
@@ -244,18 +249,28 @@ function PassGate({ onPay }: { onPay: (id: string, name: string, price: number) 
       <p className="max-w-md text-lg font-bold">{t("signal.needPass")}</p>
       <p className="max-w-md text-sm text-muted-foreground">{t("signal.needPassDesc")}</p>
       <div className="flex flex-wrap items-center justify-center gap-3">
-        <Button onClick={() => onPay("PASS_7D", t("products.pass7d.name"), 5)} size="lg" className="gap-2 font-bold">
+        <Button
+          onClick={() => onPay("PASS_7D", t("products.pass7d.name"), week.pricePengu)}
+          size="lg"
+          className="gap-2 font-bold"
+        >
           <Sparkles className="size-5" />
-          {t("products.pass7d.name")} — 5 PENGU
+          {t("products.pass7d.name")} — {week.pricePengu} PENGU
+          <Badge className="ms-1 bg-buy/15 text-buy hover:bg-buy/15" variant="secondary">
+            −{week.discountPct}%
+          </Badge>
         </Button>
         <Button
-          onClick={() => onPay("PASS_30D", t("products.pass30d.name"), 30)}
+          onClick={() => onPay("PASS_30D", t("products.pass30d.name"), month.pricePengu)}
           size="lg"
           variant="outline"
           className="gap-2 font-bold"
         >
           <Calendar className="size-5" />
-          {t("products.pass30d.name")} — 30 PENGU
+          {t("products.pass30d.name")} — {month.pricePengu} PENGU
+          <Badge className="ms-1 bg-buy/15 text-buy hover:bg-buy/15" variant="secondary">
+            −{month.discountPct}%
+          </Badge>
         </Button>
       </div>
       <a

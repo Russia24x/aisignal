@@ -16,7 +16,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Globe, Loader2, LogOut, Snowflake, Wallet } from "lucide-react";
+import { ChevronDown, Copy, ExternalLink, Globe, Loader2, LogOut, Snowflake, Wallet } from "lucide-react";
+import { toast } from "sonner";
+import { publicConfig } from "@/lib/public-config";
 import { AbstractProfile } from "@/components/abstract/AbstractProfile";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +27,14 @@ export function Header() {
   const { address, entitlements, signingIn, login, signIn, signOut, walletStatus } = useAuth();
   const { data } = useMarket();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  /** Sign in and surface a localized toast when it fails. */
+  const handleSignIn = async () => {
+    const res = await signIn();
+    if (!res.ok && res.errorCode) {
+      toast.error(t(`wallet.error.${res.errorCode}`));
+    }
+  };
 
   const price = data?.snapshot.priceUsd;
   const change = data?.snapshot.change24h ?? 0;
@@ -105,6 +115,41 @@ export function Header() {
                 {t("nav.dashboard")}
               </div>
               <DropdownMenuItem
+                className="gap-2"
+                onClick={() => {
+                  navigator.clipboard
+                    .writeText(address!)
+                    .then(() => toast.success(t("dashboard.copied")))
+                    .catch(() => undefined);
+                  setMenuOpen(false);
+                }}
+              >
+                <Copy className="size-4" />
+                {t("dashboard.copyAddress")}
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a
+                  href={`${publicConfig.explorerUrl}/address/${address}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex cursor-pointer items-center gap-2"
+                >
+                  <ExternalLink className="size-4" />
+                  {t("dashboard.viewOnExplorer")}
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a
+                  href={`https://abs.xyz/profile/${address}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex cursor-pointer items-center gap-2"
+                >
+                  <ExternalLink className="size-4" />
+                  {t("dashboard.viewOnPortal")}
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 onClick={() => {
                   setMenuOpen(false);
                   signOut();
@@ -117,7 +162,7 @@ export function Header() {
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <Button onClick={() => signIn()} size="sm" disabled={signingIn} className="gap-2 font-bold">
+          <Button onClick={handleSignIn} size="sm" disabled={signingIn} className="gap-2 font-bold">
             {signingIn ? <Loader2 className="size-4 animate-spin" /> : <Wallet className="size-4" />}
             <span className="hidden sm:inline">{signingIn ? t("wallet.signing") : t("wallet.signInTitle")}</span>
           </Button>

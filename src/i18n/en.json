@@ -115,22 +115,24 @@
     },
     "pass30d": {
       "name": "30-Day Pass",
-      "desc": "One full month — about 1 PENGU per day"
+      "desc": "A full month of daily signals"
     },
     "pass365d": {
       "name": "1-Year Pass",
-      "desc": "One full year of access — best value"
+      "desc": "A full year of signals — maximum discount"
     },
     "passLifetime": {
       "name": "Lifetime Access",
-      "desc": "Forever — no renewals, no worries"
+      "desc": "Forever — just 2× the yearly pass"
     },
     "legacy": {
       "platform": "Platform Access (legacy)",
       "dayPass": "Day Pass (legacy)",
       "sub7": "7-Day Subscription (legacy)",
       "sub30": "30-Day Subscription (legacy)"
-    }
+    },
+    "discount": "off",
+    "discountNote": "Longer passes cost less per day — up to 30% off"
   },
   "track": {
     "title": "Real Signal Track Record",
@@ -171,7 +173,7 @@
     "q4": "Why Abstract?",
     "a4": "Abstract is an Ethereum L2 with negligible fees — the official home of the Pudgy Penguins ecosystem and the PENGU token. Where penguins live.",
     "q5": "Is registration free?",
-    "a5": "Yes! Signing up and browsing (live market, track record, dashboard) is completely free. You only need an access pass (from 5 PENGU for a week up to lifetime) to read the signal content.",
+    "a5": "Yes! Signing up and browsing (live market, track record, dashboard) is completely free. To read signal content you need an access pass — from 10 PENGU for one day up to lifetime, with stepped discounts capped at 30%.",
     "q6": "Do you use session keys?",
     "a6": "No. Payments are plain PENGU token transfers to the treasury address — no approvals, no permanent wallet access. Everything is verified fully on-chain."
   },
@@ -188,7 +190,13 @@
     "signInDesc": "Sign this message with your wallet to create a secure session.",
     "signing": "Waiting for signature…",
     "signFailed": "Signature failed",
-    "welcome": "Welcome"
+    "welcome": "Welcome",
+    "error": {
+      "RATE_LIMITED": "Too many attempts — wait a moment and try again",
+      "SIGNATURE_REJECTED": "Signature request rejected",
+      "SIGNATURE_FAILED": "Signature verification failed — try again",
+      "NETWORK": "Network error — try again"
+    }
   },
   "common": {
     "loading": "Loading…",
@@ -234,7 +242,17 @@
     "paymentsCount": "Payments",
     "freeTier": "Free tier",
     "passHolder": "Pass holder",
-    "noPass": "No active pass"
+    "noPass": "No active pass",
+    "penguBalance": "PENGU balance",
+    "ethBalance": "ETH (gas)",
+    "ethHint": "For transaction fees on Abstract",
+    "usdEstimate": "USD value at the live price",
+    "copyAddress": "Copy address",
+    "copied": "Copied!",
+    "viewOnExplorer": "View on explorer",
+    "openPortal": "Abstract Portal",
+    "portalHint": "Swap, bridge and manage your assets",
+    "quickLinks": "Quick links"
   },
   "alerts": {
     "title": "Price Alerts",

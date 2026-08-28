@@ -17,6 +17,7 @@ import { abstract } from "viem/chains";
 import { AbstractWalletProvider } from "@abstract-foundation/agw-react";
 import { QueryClient } from "@tanstack/react-query";
 import { I18nProvider } from "@/components/i18n/I18nProvider";
+import { Toaster } from "@/components/ui/sonner";
 import { publicConfig } from "@/lib/public-config";
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -31,6 +32,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           queryClient={queryClient}
         >
           {children}
+          <Toaster position="top-center" closeButton richColors />
         </AbstractWalletProvider>
       </ThemeProvider>
     </I18nProvider>

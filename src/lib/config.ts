@@ -50,11 +50,16 @@ const serverSchema = z.object({
   HISTORY_CACHE_TTL_MS: z.coerce.number().default(900_000),
   DATA_FETCH_TIMEOUT_MS: z.coerce.number().default(15_000),
 
-  // Rate limits
-  RATE_LIMIT_AUTH: z.string().default("10/60000"),
+  // Rate limits.
+  // AUTH is generous on purpose: one sign-in = nonce + verify (2 hits), the
+  // auto sign-in fires on every wallet connect, and behind a single gateway
+  // ALL visitors share one client IP — 10/min made normal usage hit 429s.
+  // PUBLIC must absorb session polls from every useAuth() instance plus
+  // market/profile fetches on each page load (~10 req/load).
+  RATE_LIMIT_AUTH: z.string().default("30/60000"),
   RATE_LIMIT_PAYMENT: z.string().default("10/60000"),
   RATE_LIMIT_SIGNAL: z.string().default("30/60000"),
-  RATE_LIMIT_PUBLIC: z.string().default("60/60000"),
+  RATE_LIMIT_PUBLIC: z.string().default("120/60000"),
 
   // Session
   SESSION_TTL_HOURS: z.coerce.number().default(168),

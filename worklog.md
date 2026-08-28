@@ -475,3 +475,67 @@ Stage Summary:
   all gating server-side
 - Future session keys: documented path, zero current code, verifyAndCredit
   is the single integration point
+
+---
+Task ID: 12
+Agent: main
+Task: Tariff v3 (balanced & stepped, anchored 10 PENGU/day, discounts capped at 30%), Profile & Wallet panel v2 (balances + Portal/Explorer links), RATE_LIMITED login bug fix
+
+Work Log:
+- SESSION-START-SYNC-CHECK: fetched origin, 1 unpushed QA commit (screenshots), in sync otherwise
+- BUG FIX (user-reported RATE_LIMITED at useAuth.ts:73):
+  1. Root cause: RATE_LIMIT_AUTH=10/min per IP, but one sign-in = nonce+verify
+     (2 hits), auto sign-in fires per wallet connect, and ALL gateway traffic
+     shares one client IP → 5 login attempts/min max
+  2. Raised RATE_LIMIT_AUTH 10→30/min, RATE_LIMIT_PUBLIC 60→120/min
+     (4 useAuth instances fetch session per page load) — config.ts + .env + .env.example
+  3. Burst-verified: 30 nonce GETs pass, 31st gets 429
+  4. signIn() no longer throws (unhandled rejection crashed the dev overlay);
+     returns { ok, errorCode } with stable codes → Header shows localized
+     toast (wallet.error.RATE_LIMITED / SIGNATURE_REJECTED / SIGNATURE_FAILED / NETWORK)
+  5. Mounted sonner Toaster in Providers; rewrote lint-triggering effects as
+     async IIFEs (react-hooks/set-state-in-effect now clean, no suppressions)
+- TARIFF v3 (user: "prices not balanced, 1 day = 10 PENGU, stepped discount up to 30% cap"):
+  - Anchor 10 PENGU/day; steps 0/10/20/30/30% → 1D=10, 7D=63, 30D=240,
+    365D=2555, LIFETIME=5110 (= 2× annual). Per-day staircase 10→9→8→7
+  - passes.ts: added basePricePengu + discountPct to AccessPassDef (single
+    source of truth — server verification + client grid both use it; old
+    grants unaffected, no migration needed)
+  - PricingSection: green −X% badges, strikethrough base prices, discount
+    note pill under header; per-day hints now 9.00/8.00/7.00
+  - SignalSection PassGate: removed hardcoded 5/30 PENGU → catalog-driven
+    with discount badges
+  - i18n fa+en: new products.discount/discountNote, updated descs (removed
+    "1 PENGU/day" claim), FAQ a5 rewritten for v3, wallet.error.* codes
+  - Docs: ACCESS-MODEL.md + README.md tariff tables with list/discount/price
+    columns + pricing formula section
+- PROFILE & WALLET PANEL v2 (user request):
+  - MyDashboard PortalIdentity → IdentityWalletPanel: identity row (avatar,
+    tier, badges, address + copy button with 1.6s feedback) + balances row
+    (PENGU big number + live USD estimate from market snapshot price, ETH gas
+    balance, both via wagmi useBalance with 30s refetch) + quick links
+    (AbstractScan address page, Abstract Portal app, Portal profile)
+  - Header wallet dropdown: copy address (toast), view on explorer, view on
+    Portal — portal capabilities at hand everywhere
+- QA (agent-browser + forged HMAC session cookies for 3 real users):
+  - Pricing grid renders exactly 0/10/63/240/2555/5110 with badges
+    0/10/20/30/30% + strikethrough 70/300/3650/7300; VLM visual check PASS
+  - Treasury wallet session: REAL on-chain balances rendered — 337.88 PENGU
+    (≈ $3.15, math verified vs live price) + 0.0029 ETH
+  - Pass-holder session: signal unlocked (BUY, entry zone, stop loss) —
+    content gating intact; free user sees masked preview + pass gate
+  - FAQ a5 shows new tariff text; discount note visible; mobile 390px:
+    zero overflow, VLM 5/5 PASS; desktop full-page: PASS production-ready
+  - lint clean, tsc clean (project), dev.log clean (all 200s)
+
+Stage Summary:
+- Tariff is now internally consistent (longer = cheaper per day, max 30% off);
+  price change is one file (passes.ts) and server-verified against the same
+  catalog — no client-trusted amounts anywhere
+- Login reliability fixed at the root (limits + no-throw + friendly toasts)
+- Wallet panel reads live on-chain data client-side (same RPC as the wallet),
+  no new API surface; USD estimate reuses the cached market snapshot
+- Old QA screenshots (qa-v2-*.png) still in repo root from previous commit;
+  left untouched
+- Next candidates: P1 alerts/notification delivery, signal history pagination
+  in UI, admin panel; P2 Telegram/email alerts, user settings; P3 Cloudflare

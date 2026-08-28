@@ -21,6 +21,7 @@ import {
   Gem,
   Sparkles,
   Ticket,
+  TrendingDown,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -55,6 +56,10 @@ export function PricingSection() {
         <header className="mb-8 text-center">
           <h2 className="text-2xl font-black sm:text-3xl">{t("products.choose")}</h2>
           <p className="mt-2 text-sm text-muted-foreground">{t("products.freeTierNote")}</p>
+          <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-buy/30 bg-buy/10 px-3 py-1 text-xs font-bold text-buy">
+            <TrendingDown className="size-3.5" />
+            {t("products.discountNote")}
+          </p>
         </header>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -88,6 +93,7 @@ export function PricingSection() {
             const perDay = perDayPrice(pass);
             const owned = activeProduct === pass.id;
             const name = t(`products.${meta.i18nKey}.name`);
+            const hasDiscount = pass.discountPct > 0;
             return (
               <div
                 key={pass.id}
@@ -99,6 +105,14 @@ export function PricingSection() {
                 {meta.bestValue && (
                   <Badge className="absolute -top-2.5 start-1/2 -translate-x-1/2 bg-primary px-3 font-black text-primary-foreground">
                     ★
+                  </Badge>
+                )}
+                {hasDiscount && (
+                  <Badge
+                    className="absolute -top-2.5 end-3 bg-buy px-2 py-0.5 font-black text-buy-foreground shadow-sm"
+                    aria-label={t("products.discount")}
+                  >
+                    −{pass.discountPct}%
                   </Badge>
                 )}
                 <span
@@ -114,8 +128,15 @@ export function PricingSection() {
                   {t(`products.${meta.i18nKey}.desc`)}
                 </p>
                 <div className="mt-4 flex flex-col gap-0.5" dir="ltr">
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="font-mono text-3xl font-black text-primary">{pass.pricePengu}</span>
+                  <div className="flex flex-wrap items-baseline gap-1.5">
+                    {hasDiscount && (
+                      <span className="font-mono text-sm font-bold text-muted-foreground line-through decoration-sell/70">
+                        {pass.basePricePengu.toLocaleString("en-US")}
+                      </span>
+                    )}
+                    <span className="font-mono text-3xl font-black text-primary">
+                      {pass.pricePengu.toLocaleString("en-US")}
+                    </span>
                     <span className="text-xs font-bold text-muted-foreground">PENGU</span>
                   </div>
                   {perDay !== null && (

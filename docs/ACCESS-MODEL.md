@@ -6,14 +6,20 @@
 
 ## 1. Tariff
 
-| Tier | Product ID | Price (PENGU) | Duration |
-|---|---|---:|---|
-| Free | — | 0 | forever (browse-only) |
-| Day | `PASS_1D` | 10 | 1 day |
-| Week | `PASS_7D` | 5 | 7 days |
-| Month | `PASS_30D` | 30 | 30 days |
-| Year | `PASS_365D` | 100 | 365 days |
-| Lifetime | `PASS_LIFETIME` | 1500 | ∞ (≈100 years, stored as a grant) |
+| Tier | Product ID | List | Discount | Price (PENGU) | ≈/day | Duration |
+|---|---|---:|---:|---:|---:|---|
+| Free | — | — | — | 0 | — | forever (browse-only) |
+| Day | `PASS_1D` | 10 | 0% | **10** | 10.0 | 1 day |
+| Week | `PASS_7D` | 70 | 10% | **63** | 9.0 | 7 days |
+| Month | `PASS_30D` | 300 | 20% | **240** | 8.0 | 30 days |
+| Year | `PASS_365D` | 3650 | 30% | **2555** | 7.0 | 365 days |
+| Lifetime | `PASS_LIFETIME` | 7300 | 30% | **5110** | — | ∞ (≈100 years, stored as a grant) |
+
+**Pricing formula (v3, balanced):** anchor = 10 PENGU for one day. Each
+longer tier gets a stepped duration discount — 10% (week), 20% (month),
+30% (year, hard cap) — producing a clean per-day staircase of
+10 → 9 → 8 → 7 PENGU. Lifetime is priced at exactly 2× the annual pass
+(≈ 6.7 PENGU/day for the first two years, free forever after).
 
 **Single source of truth:** `src/lib/modules/access/passes.ts` — imported by
 both server (verification, grants) and client (pricing grid). Changing a

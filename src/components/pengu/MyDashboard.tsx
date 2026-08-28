@@ -17,13 +17,16 @@
  *
  * @module components/pengu/MyDashboard
  */
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAccount, useBalance } from "wagmi";
 import { useI18n, type Locale } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
+import { useMarket } from "./useMarket";
 import { useAbstractProfile } from "@/hooks/useAbstractProfile";
 import { getTierColor } from "@/lib/abstract/profile";
 import { AbstractProfile } from "@/components/abstract/AbstractProfile";
-import { publicConfig } from "@/lib/public-config";
+import { publicConfig, formatPengu as formatPenguUnits } from "@/lib/public-config";
 import type { EntitlementsDTO } from "@/lib/modules/access/passes";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,10 +39,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  ArrowUpRight,
   CalendarClock,
+  Check,
   CheckCircle2,
   Coins,
+  Copy,
   ExternalLink,
+  Fuel,
   History,
   Loader2,
   Medal,
@@ -152,6 +159,24 @@ function formatPengu(n: number): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
 
+/** Boolean state that auto-resets to false after `ms` (default 1.6s). */
+function useStateWithTimeout(ms = 1600): [boolean, (v: boolean) => void] {
+  const [value, setValue] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const set = useCallback(
+    (v: boolean) => {
+      setValue(v);
+      if (timer.current) clearTimeout(timer.current);
+      if (v) timer.current = setTimeout(() => setValue(false), ms);
+    },
+    [ms],
+  );
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  return [value, set];
+}
+
 /* --------------------------- main --------------------------- */
 
 export function MyDashboard() {
@@ -237,8 +262,8 @@ export function MyDashboard() {
           </div>
         </header>
 
-        {/* Abstract Portal identity banner */}
-        <PortalIdentity
+        {/* Abstract Portal identity + on-chain wallet panel */}
+        <IdentityWalletPanel
           address={address as `0x${string}` | null}
           profile={portalProfile}
           loading={profileQuery.isLoading}
@@ -276,12 +301,30 @@ export function MyDashboard() {
 
 type TFunc = (key: string) => string;
 
+/** Format a native ETH amount (18 decimals) for display. */
+function formatEth(raw: bigint | undefined | null): string {
+  if (raw === null || raw === undefined) return "0";
+  return (Number(raw) / 1e18).toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+/** Format a USD amount for display. */
+function formatUsd(n: number): string {
+  return n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: n < 1 ? 4 : 2,
+  });
+}
+
 /**
- * Abstract Portal identity banner — avatar with tier ring, display name,
- * tier badge, badge count and a deep-link to the public Portal profile.
- * Gracefully degrades when the wallet has no Portal profile yet.
+ * Identity + Wallet panel — Abstract Portal identity on top, live on-chain
+ * balances underneath (PENGU with USD estimate + ETH for gas), plus deep
+ * links to the Abstract Portal and the AbstractScan explorer.
+ *
+ * Balances are read client-side through wagmi (same RPC the wallet uses);
+ * they re-validate every 30s while the dashboard is open.
  */
-function PortalIdentity({
+function IdentityWalletPanel({
   address,
   profile,
   loading,
@@ -292,88 +335,223 @@ function PortalIdentity({
   loading: boolean;
   t: TFunc;
 }) {
+  const { address: wagmiAddress } = useAccount();
+  const wallet = wagmiAddress ?? address;
+
+  const { data: penguBalance, isLoading: penguLoading } = useBalance({
+    address: wallet ?? undefined,
+    token: publicConfig.penguToken,
+    chainId: publicConfig.chainId,
+    query: { refetchInterval: 30_000, enabled: !!wallet },
+  });
+  const { data: ethBalance, isLoading: ethLoading } = useBalance({
+    address: wallet ?? undefined,
+    chainId: publicConfig.chainId,
+    query: { refetchInterval: 30_000, enabled: !!wallet },
+  });
+  const { data: market } = useMarket();
+  const priceUsd = market?.snapshot.priceUsd;
+
+  const [copied, setCopied] = useStateWithTimeout();
+
   if (!address) return null;
 
   const tierNameKey = `dashboard.tier.${profile?.tier ?? 1}`;
   const tierName = t(tierNameKey) !== tierNameKey ? t(tierNameKey) : t("dashboard.tier.1");
   const tierColor = getTierColor(profile?.tier ?? 1);
-  const displayName =
-    profile?.name || `${address.slice(0, 6)}…${address.slice(-4)}`;
+  const displayName = profile?.name || `${address.slice(0, 6)}…${address.slice(-4)}`;
+
+  const penguNum = penguBalance ? Number(penguBalance.value) / 1e18 : null;
+  const usdValue = penguNum !== null && priceUsd ? penguNum * priceUsd : null;
+
+  const copyAddress = async () => {
+    if (!address) return;
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
+  };
 
   return (
-    <div className="glass-card mb-4 flex flex-wrap items-center gap-4 p-4 sm:gap-5">
-      <AbstractProfile address={address} size="lg" showTooltip={false} />
+    <div className="glass-card mb-4 overflow-hidden p-0">
+      {/* ── identity row ── */}
+      <div className="flex flex-wrap items-center gap-4 p-4 sm:gap-5">
+        <AbstractProfile address={address} size="lg" showTooltip={false} />
 
-      <div className="min-w-0 flex-1">
-        {loading ? (
-          <Skeleton className="mb-1.5 h-5 w-32" />
-        ) : (
-          <p className="truncate text-sm font-black sm:text-base">{displayName}</p>
-        )}
-        <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          <span>{t("dashboard.portalIdentity")}</span>
-          {profile ? (
-            <Badge
-              variant="outline"
-              className="gap-1 border-transparent px-1.5 font-bold"
-              style={{ color: tierColor, background: `${tierColor}1a` }}
-            >
-              <Medal className="size-3" />
-              {tierName}
-            </Badge>
-          ) : loading ? null : (
-            <span className="opacity-70">{t("dashboard.noPortalProfile")}</span>
+        <div className="min-w-0 flex-1">
+          {loading ? (
+            <Skeleton className="mb-1.5 h-5 w-32" />
+          ) : (
+            <p className="truncate text-sm font-black sm:text-base">{displayName}</p>
           )}
-        </p>
-      </div>
-
-      {profile && profile.badges.length > 0 && (
-        <TooltipProvider delayDuration={200}>
-          <div className="flex items-center gap-1.5" dir="ltr">
-            {profile.badges.slice(0, 5).map((b) => (
-              <Tooltip key={b.id}>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            {profile ? (
+              <Badge
+                variant="outline"
+                className="gap-1 border-transparent px-1.5 font-bold"
+                style={{ color: tierColor, background: `${tierColor}1a` }}
+              >
+                <Medal className="size-3" />
+                {tierName}
+              </Badge>
+            ) : loading ? null : (
+              <span className="opacity-70">{t("dashboard.noPortalProfile")}</span>
+            )}
+            <span className="font-mono" dir="ltr">{shortAddr(address)}</span>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
                 <TooltipTrigger asChild>
-                  <span
-                    className="grid size-8 place-items-center overflow-hidden rounded-full bg-muted/60 ring-1 ring-border/60 transition-transform hover:scale-110"
-                    role="img"
-                    aria-label={b.name}
-                  >
-                    {b.icon ? (
-                      <img src={b.icon} alt={b.name} className="size-full object-cover" loading="lazy" />
-                    ) : (
-                      <Medal className="size-3.5 text-muted-foreground" />
+                  <button
+                    type="button"
+                    onClick={copyAddress}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-border transition-colors",
+                      copied ? "text-buy ring-buy/40" : "text-muted-foreground hover:text-primary",
                     )}
-                  </span>
+                    aria-label={t("dashboard.copyAddress")}
+                  >
+                    {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+                    {copied ? t("dashboard.copied") : t("dashboard.copyAddress")}
+                  </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-xs">
-                  <p className="font-medium">{b.name}</p>
+                <TooltipContent side="bottom" className="font-mono text-xs">
+                  <span dir="ltr">{address}</span>
                 </TooltipContent>
               </Tooltip>
-            ))}
-            {profile.badgeCount > profile.badges.length && (
-              <Badge variant="secondary" className="font-mono text-[10px]">
-                +{profile.badgeCount - profile.badges.length}
-              </Badge>
-            )}
+            </TooltipProvider>
           </div>
-        </TooltipProvider>
-      )}
+        </div>
 
-      <Button
-        asChild
-        size="sm"
-        variant="ghost"
-        className="gap-1.5 text-muted-foreground"
-      >
-        <a
-          href={`https://abs.xyz/profile/${address}`}
-          target="_blank"
-          rel="noopener noreferrer"
+        {profile && profile.badges.length > 0 && (
+          <TooltipProvider delayDuration={200}>
+            <div className="flex items-center gap-1.5" dir="ltr">
+              {profile.badges.slice(0, 5).map((b) => (
+                <Tooltip key={b.id}>
+                  <TooltipTrigger asChild>
+                    <span
+                      className="grid size-8 place-items-center overflow-hidden rounded-full bg-muted/60 ring-1 ring-border/60 transition-transform hover:scale-110"
+                      role="img"
+                      aria-label={b.name}
+                    >
+                      {b.icon ? (
+                        <img src={b.icon} alt={b.name} className="size-full object-cover" loading="lazy" />
+                      ) : (
+                        <Medal className="size-3.5 text-muted-foreground" />
+                      )}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    <p className="font-medium">{b.name}</p>
+                  </TooltipContent>
+                </Tooltip>
+              ))}
+              {profile.badgeCount > profile.badges.length && (
+                <Badge variant="secondary" className="font-mono text-[10px]">
+                  +{profile.badgeCount - profile.badges.length}
+                </Badge>
+              )}
+            </div>
+          </TooltipProvider>
+        )}
+
+        <Button
+          asChild
+          size="sm"
+          variant="ghost"
+          className="gap-1.5 text-muted-foreground"
         >
-          <ExternalLink className="size-3.5" />
-          <span className="hidden sm:inline">{t("dashboard.viewOnPortal")}</span>
-        </a>
-      </Button>
+          <a
+            href={`https://abs.xyz/profile/${address}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink className="size-3.5" />
+            <span className="hidden sm:inline">{t("dashboard.viewOnPortal")}</span>
+          </a>
+        </Button>
+      </div>
+
+      {/* ── wallet balances row ── */}
+      <div className="grid gap-px bg-border/40 sm:grid-cols-3">
+        {/* PENGU balance */}
+        <div className="flex flex-col gap-1 bg-card p-4">
+          <p className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+            <Coins className="size-3.5 text-primary" />
+            {t("dashboard.penguBalance")}
+          </p>
+          {penguLoading && !penguBalance ? (
+            <Skeleton className="h-8 w-28" />
+          ) : (
+            <div className="flex items-baseline gap-1.5" dir="ltr">
+              <span className="font-mono text-2xl font-black text-primary">
+                {formatPenguUnits(penguBalance?.value)}
+              </span>
+              <span className="text-[11px] font-bold text-muted-foreground">PENGU</span>
+            </div>
+          )}
+          {usdValue !== null ? (
+            <p className="font-mono text-[11px] text-muted-foreground" dir="ltr">
+              ≈ {formatUsd(usdValue)}
+            </p>
+          ) : (
+            <p className="text-[11px] text-muted-foreground/60">{t("dashboard.usdEstimate")}</p>
+          )}
+        </div>
+
+        {/* ETH gas balance */}
+        <div className="flex flex-col gap-1 bg-card p-4">
+          <p className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+            <Fuel className="size-3.5 text-hold" />
+            {t("dashboard.ethBalance")}
+          </p>
+          {ethLoading && !ethBalance ? (
+            <Skeleton className="h-8 w-24" />
+          ) : (
+            <div className="flex items-baseline gap-1.5" dir="ltr">
+              <span className="font-mono text-2xl font-black">{formatEth(ethBalance?.value)}</span>
+              <span className="text-[11px] font-bold text-muted-foreground">ETH</span>
+            </div>
+          )}
+          <p className="text-[11px] text-muted-foreground/60">{t("dashboard.ethHint")}</p>
+        </div>
+
+        {/* quick links */}
+        <div className="flex flex-col gap-2 bg-card p-4">
+          <p className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+            <Wallet className="size-3.5 text-primary" />
+            {t("dashboard.quickLinks")}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild size="sm" variant="outline" className="h-8 gap-1.5 px-2.5 text-[11px] font-bold">
+              <a
+                href={`${publicConfig.explorerUrl}/address/${address}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <ArrowUpRight className="size-3.5" />
+                {t("dashboard.viewOnExplorer")}
+              </a>
+            </Button>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button asChild size="sm" variant="outline" className="h-8 gap-1.5 px-2.5 text-[11px] font-bold">
+                    <a href="https://portal.abs.xyz" target="_blank" rel="noopener noreferrer">
+                      <ArrowUpRight className="size-3.5" />
+                      {t("dashboard.openPortal")}
+                    </a>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">
+                  {t("dashboard.portalHint")}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
