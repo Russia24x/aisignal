@@ -136,3 +136,24 @@ model EngineSnapshot {
 
   @@index([day])
 }
+
+/// User-defined price alert. Triggered by the alert-checker when the live
+/// PENGU price crosses the user-defined target in the chosen direction.
+model PriceAlert {
+  id           String    @id @default(cuid())
+  userId       String
+  /// "ABOVE" → fire when priceUsd >= target ; "BELOW" → fire when priceUsd <= target
+  direction    String
+  /// target price in USD (float — PENGU is a low-magnitude token)
+  target       Float
+  /// whether the alert is still actively monitoring
+  active       Boolean   @default(true)
+  /// null until first triggered
+  triggeredAt  DateTime?
+  /// the price at which it fired (for auditability)
+  triggeredPrice Float?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, active])
+  @@index([direction, active])
+}

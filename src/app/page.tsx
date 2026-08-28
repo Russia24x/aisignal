@@ -3,8 +3,9 @@
 /**
  * PenguSignals — single-page application.
  *
- * Composition: Header → Hero → PriceChart → SignalSection (paywalled
- * product) → PricingSection → TrackRecord → EngineSection → FAQ → Footer.
+ * Composition: Header → LiveTicker (WS) → Hero → PriceChart →
+ * SignalSection (paywalled product) → MyDashboard (gated) →
+ * PricingSection → TrackRecord → EngineSection → FAQ → Footer.
  *
  * Everything below is real: live market data, real engine output,
  * on-chain payment verification. No demo/mock data anywhere.
@@ -12,10 +13,13 @@
  * @module app/page
  */
 import { Header } from "@/components/pengu/Header";
+import { LiveTicker } from "@/components/pengu/LiveTicker";
 import { Hero } from "@/components/pengu/Hero";
 import { PriceChart } from "@/components/pengu/PriceChart";
 import { SignalSection } from "@/components/pengu/SignalSection";
+import { MyDashboard } from "@/components/pengu/MyDashboard";
 import { PricingSection } from "@/components/pengu/PricingSection";
+import { PriceAlerts } from "@/components/pengu/PriceAlerts";
 import { TrackRecord } from "@/components/pengu/TrackRecord";
 import { EngineSection } from "@/components/pengu/EngineSection";
 import { FaqSection, Footer } from "@/components/pengu/FaqFooter";
@@ -28,12 +32,15 @@ export default function Home() {
       <div className="ice-grid" aria-hidden />
 
       <Header />
+      <LiveTicker />
 
       <main className="flex-1">
         <Hero />
         <PriceChart />
         <SignalSection />
+        <MyDashboard />
         <PricingSection />
+        <PriceAlerts />
         <TrackRecord />
         <EngineSection />
         <FaqSection />

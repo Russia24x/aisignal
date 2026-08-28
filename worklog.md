@@ -63,3 +63,159 @@ Work Log:
 Stage Summary:
 - Phase 1 COMPLETE: platform is fully functional and verified end-to-end with real data + real on-chain payments
 - Next-phase candidates (for the recurring review agent): add signal email/telegram notifications, per-user signal history page, KV-based distributed rate limiting for Cloudflare, SEO/OG meta images, WebSocket live price ticker, session-key autopay research
+
+---
+Task ID: 4
+Agent: main
+Task: Phase 2 UI/UX polish — fix bugs found in QA + add visual polish layer
+
+Work Log:
+- QA via agent-browser: full snapshot of EN + FA (RTL) views, mobile + desktop screenshots, VLM review (9/10 polish target)
+- Fixed Hero H1 spacing bug (title1 + PENGU were running together — now block + flex layout with explicit gap)
+- Added CSS polish layer (globals.css): luminous ::before border on glass-card, ambient orbs, shimmer sweep, pulse-ring, CTA glow, num-tick animations, glassmorphic recharts tooltip override, aurora-divider, empty-grid pattern, glow-primary, focus-ring
+- Hero: ambient orbs, cta-glow on primary CTA, hover lift on stat cards
+- Header: live price pill now uses tick-up/tick-down + pulse-ring on the indicator dot
+- PriceChart: glassmorphic tooltip (backdrop blur + dark glass bg), better activeDot styling
+- SignalSection: consensus bar with shimmer overlay + 3-color transitions
+- TrackRecord: empty state rebuilt with empty-grid bg + Trophy icon + subtitle
+- Layout: full metadata (openGraph, twitter, robots, icons), metadataBase, themeColor, colorScheme
+- Added /icon.svg (custom Pengu snowflake + silhouette favicon, served as app/icon.svg → /icon.svg)
+- Added /api/og route (1200×630 SVG OG card with penguin silhouette, accent gradient, grid pattern)
+
+Stage Summary:
+- Lint clean, TS clean, dev.log zero errors, HTTP 200
+- H1 bug fixed (visible in both EN snapshot "Buy & Sell Signals for PENGU" and FA snapshot)
+- VLM rated polished version 9/10 overall polish, 8/10 brand consistency, 8/10 typography
+- OG image served with image/svg+xml, 1h cache
+- icon.svg served correctly at /icon.svg
+
+---
+Task ID: 5-a
+Agent: full-stack-developer
+Task: WebSocket live PENGU price ticker mini-service + hook + LiveTicker component
+
+Work Log:
+- Created `mini-services/ws-ticker/` as an independent bun project (port 3033 literal, `bun --hot index.ts` dev script)
+- `bun add socket.io` → installed socket.io@4.8.3 + 22 transitive deps in mini-services/ws-ticker/node_modules
+- `mini-services/ws-ticker/index.ts`: socket.io server bound to port 3033, path `/` (Caddy gateway contract), CORS allow-list for localhost:3000 + permissive allowRequest for dev. Polls DexScreener (`api.dexscreener.com/latest/dex/tokens/0x9eBe3A824Ca958e4b3Da772D2065518F009CBa62`) every 15s, picks deepest-liquidity Abstract pair, extracts `{priceUsd, change24h, volume24h, liquidityUsd, fdv, fetchedAt}`, broadcasts as `price` event. On client connect immediately emits cached snapshot. Heartbeat every 60s: `[%s] tick: $%s  clients=%d`. SIGINT/SIGTERM graceful shutdown. Tiny HTTP health-check handler too (overridden by socket.io on path `/`).
+- Created `src/hooks/useTicker.ts`: 'use client' hook. Lazily `await import("socket.io-client")` inside useEffect (no SSR import). Connects via `io("/?XTransformPort=3033", {...})` — path `/` + XTransformPort=3033 (MANDATORY, verified by grep, no direct localhost:3033 URL anywhere). Auto-reconnect with default exponential backoff (reconnectionAttempts: Infinity, 1s→10s). Returns `{price, change24h, volume24h, liquidityUsd, fdv, fetchedAt, connected}`. Maps server `priceUsd`→hook `price`. Cleanup on unmount: removeAllListeners + disconnect.
+- Created `src/components/pengu/LiveTicker.tsx`: 'use client' thin horizontal marquee bar. Tailwind: `border-b border-border/50 bg-card/40 backdrop-blur-xl text-xs font-mono`. Left-aligned "PENGU/USD LIVE" label with green pulsing dot (muted grey when disconnected), then `|` separator, then flex row of stats (PRICE / 24H with ▲▼ colored icon + tone / VOL / LIQ / FDV / HH:MM:SS fetched time) separated by `•`. dir="ltr" (numeric, locale-independent). Loading… muted state until first tick. reconnecting… indicator when connected=false but data present. Horizontal scroll on mobile (scrollbar hidden).
+- Verified: `bun run lint` clean (0 errors / 0 warnings). `bun run dev` boots and logs `[ws-ticker] listening on 3033`. End-to-end test with a socket.io-client bun script confirmed the server emits the `price` event with real DexScreener data (`{"priceUsd":0.009315,"change24h":-2.91,"volume24h":43208.85,"liquidityUsd":455624.39,"fdv":22520247,"fetchedAt":1787910930005}`) and that the cached snapshot is pushed to new clients immediately on connect.
+
+Stage Summary:
+- Files created (4): `mini-services/ws-ticker/package.json`, `mini-services/ws-ticker/index.ts`, `src/hooks/useTicker.ts`, `src/components/pengu/LiveTicker.tsx`
+- Files NOT modified (per constraint): page.tsx, layout.tsx, providers.tsx, prisma/schema.prisma, existing API routes, existing pengu components, eslint.config.mjs, package.json
+- socket.io-client already present in main project node_modules (transitive) so `await import("socket.io-client")` resolves without modifying main package.json
+- All acceptance checks pass: ws-ticker package.json + socket.io installed, service binds to 3033, hook+component pass `bun run lint` clean, hook uses `io("/?XTransformPort=3033")` (grep-verified)
+- To start the ticker service in dev: `cd mini-services/ws-ticker && bun run dev` (it must be running for the LiveTicker bar to show data; without it, the bar shows "loading…" then "reconnecting…")
+[manual integration needed: add LiveTicker to page.tsx after Header]
+
+---
+Task ID: 5-b
+Agent: full-stack-developer
+Task: Per-user "My Dashboard" section (auth + platform-access gated) with subscription status, payment history, platform-access status, and a days-left progress bar.
+
+Work Log:
+- Read existing architecture: entitlements.ts, payments.ts, session.ts, /api/payment/history/route.ts (auth pattern), useAuth.ts, prisma/schema.prisma, /api/signal/today/route.ts (platform-access gate pattern), SignalSection + PricingSection + TrackRecord (visual language), I18nProvider (useI18n), publicConfig (explorer URL).
+- Added `dashboard.*` i18n section (16 keys) to BOTH src/i18n/en.json and src/i18n/fa.json with natural Persian translations (validated JSON).
+- Created src/app/api/me/dashboard/route.ts (GET only):
+  - Rate-limited via existing `guard(req, "signal")` (RATE_LIMIT_SIGNAL group, same bucket as /api/signal/today).
+  - Uses existing `getSession()` for auth → 401 if no session.
+  - Uses existing `getEntitlements()` for platform-access check → 403 if no platform access.
+  - Uses existing `db` client (Prisma) to fetch: active AccessGrant (with startsAt for progress math), last 5 verified Payments, total-spent aggregate, user.platformAccessAt.
+  - Computes daysLeft, totalDays, progressPercent server-side.
+  - Returns `{ ok, dashboard: { entitlements, activeGrant, payments, platformAccessAt, daysLeft, totalSpentPengu } }` with `cache-control: no-store` + `export const dynamic = "force-dynamic"`.
+  - Parallelizes the 3 DB queries with Promise.all.
+- Created src/components/pengu/MyDashboard.tsx ('use client'):
+  - useQuery from @tanstack/react-query, enabled = `entitlements?.authenticated && entitlements?.platformAccess`.
+  - Returns null when not authenticated or no platform access (invisible for visitors / connected-but-not-paid users).
+  - Sticky section header (top-16, z-30, below the main nav) with Sparkles icon, title, subtitle, short-address Badge (with full-address Tooltip), and a Refresh button calling `queryClient.invalidateQueries({ queryKey: ["me-dashboard"] })`.
+  - 4-card grid (sm:grid-cols-2 lg:grid-cols-4) of glass-cards:
+    1. Subscription status: Active/Expired badge (buy-green vs muted), grant product name, expiresAt (locale-formatted), Progress bar with daysLeft/totalDays label.
+    2. Platform access: ✅ check icon, "Lifetime" badge, "Since: <date>" locale-formatted.
+    3. Total spent: large mono number (text-primary, 3xl, font-black) + "PENGU" suffix.
+    4. Recent payments: max-h-40 nice-scroll list of last 5, each row = colored amount (text-primary), product Badge, short tx-hash link to publicConfig.explorerUrl + ExternalLink icon + full-hash Tooltip, relative-time <time> (Intl.RelativeTimeFormat, fa-IR/en-US) with full-datetime Tooltip; empty state with History icon + noPayments copy.
+  - Skeleton placeholders during loading state per card.
+  - RTL-aware (dir="ltr" on numeric/hash lists, locale-aware date/time formatting via Intl).
+- Verification:
+  - `bun run lint` → clean (no warnings/errors).
+  - `bunx tsc --noEmit` filtered for `src/(app/api/me|components/pengu/MyDashboard)` → empty (no TS errors in new files; the only tsc errors are pre-existing in examples/websocket, skills/*, src/hooks/useTicker.ts).
+  - Started a temporary `bun run dev` instance (the system's dev server was down at the time, no process listening on :3000), curled /api/me/dashboard → HTTP 401 `{"ok":false,"error":"UNAUTHORIZED"}`. Second request 7ms (compiled+cached). Also confirmed homepage `/` still returns 200 (no build break). Then killed the temp dev server and confirmed port 3000 is free for the system to restart its own.
+
+Stage Summary:
+- Files created: src/app/api/me/dashboard/route.ts, src/components/pengu/MyDashboard.tsx
+- Files modified: src/i18n/en.json, src/i18n/fa.json (added `dashboard.*` section)
+- Integration point for main agent (page.tsx, between SignalSection and PricingSection):
+      import { MyDashboard } from "@/components/pengu/MyDashboard";
+      ... <SignalSection /> <MyDashboard /> <PricingSection /> ...
+- The component renders null for unauthenticated / no-platform-access users, so adding it to page.tsx is safe for all visitors.
+- Risk: the system's auto dev server was down during my work (no process on :3000 for ~5 min); I verified with a temp instance and cleaned up. If the main agent sees a 502 on preview, the system dev server needs a restart (independent of my changes — my route compiled and served 401 cleanly).
+
+---
+Task ID: 5-a
+Agent: full-stack-developer (subagent)
+Task: Add WebSocket live price ticker mini-service
+
+Work Log:
+- Created mini-services/ws-ticker/ (independent bun project, port 3033 literal)
+- Polls DexScreener every 15s, broadcasts `price` event via socket.io
+- Frontend src/hooks/useTicker.ts: lazy socket.io-client import, connects to io("/?XTransformPort=3033") (MANDATORY pattern)
+- src/components/pengu/LiveTicker.tsx: thin marquee bar with green pulsing dot, stats row
+- Main thread fixes: TS interop bug in useTicker.ts (cast mod to any) + integrated <LiveTicker /> into page.tsx after <Header />
+- Started ws-ticker as setsid nohup background process
+
+Stage Summary:
+- ws-ticker running on port 3033 (verified HTTP 200 on socket.io polling endpoint)
+- LiveTicker renders under Header on the home page
+- Auto-reconnect with backoff (socket.io defaults)
+- Lint clean, TS clean
+
+---
+Task ID: 5-b
+Agent: full-stack-developer (subagent)
+Task: Add per-user My Dashboard section
+
+Work Log:
+- API: src/app/api/me/dashboard/route.ts — GET, auth + platform-access gated, returns entitlements/activeGrant/payments/totalSpent
+- Component: src/components/pengu/MyDashboard.tsx — 4-card grid (subscription status with progress bar, platform access, total spent, recent payments)
+- Returns null when user not authenticated or lacks platform access (invisible for visitors)
+- i18n: 16 dashboard.* keys added to BOTH en.json and fa.json
+- Uses existing session helper, rate-limit bucket "signal", publicConfig explorerUrl
+- Integrated <MyDashboard /> into page.tsx between SignalSection and PricingSection
+
+Stage Summary:
+- API returns 401 (curl verified), 403 for authenticated-but-no-platform-access
+- Sticky header with user address + refresh button
+- Relative time formatting with Intl.RelativeTimeFormat (fa-IR/en-US)
+
+---
+Task ID: 5-c
+Agent: main
+Task: Add Price Alerts feature (DB model + API + component + engine integration)
+
+Work Log:
+- Prisma schema: added PriceAlert model (userId, direction ABOVE/BELOW, target Float, active Boolean, triggeredAt DateTime?, triggeredPrice Float?, createdAt)
+- ran `bun run db:push` to sync schema
+- src/lib/modules/alerts/checker.ts: checkAlerts(priceUsd) — evaluates all active alerts, marks fired ones
+- Hooked checker into src/lib/modules/market/service.ts getSnapshot() — fire-and-forget on every cache miss (i.e. every MARKET_CACHE_TTL_MS=60s)
+- API routes:
+  - GET /api/alerts — list user's alerts (last 30 days, max 100)
+  - POST /api/alerts/create — create with zod validation, 10-active-per-user cap (409 if exceeded)
+  - DELETE /api/alerts/[id] — ownership-scoped delete (404 if unknown or not owned)
+- Component: src/components/pengu/PriceAlerts.tsx — full create form + active alerts list + connect gate
+- i18n: 22 alerts.* keys added to both en.json and fa.json (natural Persian)
+- Integrated <PriceAlerts /> into page.tsx between PricingSection and TrackRecord
+
+Stage Summary:
+- Lint clean, TS clean (verified with `bunx tsc --noEmit` excluding examples/skills folders)
+- All API routes properly auth-gated, zod-validated, rate-limited
+- Component shows connect gate for unauthenticated users; full UI for authenticated ones
+- Quick-set chips: +5%/-5%/+10%/-10% relative to live price (auto-switches direction)
+- Active count badge with live pulsing dot
+- Empty state with empty-grid pattern + BellOff icon
+
+Stage Summary - Dev server status:
+- Dev server (port 3000) was down during work — subagent B noted this earlier
+- ws-ticker mini-service (port 3033) restarted with setsid nohup, HTTP 200 confirmed
+- All code is lint-clean + TS-clean and ready to render once dev server restarts
+- System watchdog may need time to detect and restart the Next.js dev server

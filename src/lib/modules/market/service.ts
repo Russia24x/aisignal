@@ -6,7 +6,7 @@
  *  - provider fallback with cross-checks:
  *      live snapshot  : DexScreener (Abstract DEX pair)
  *      daily/hourly   : Binance klines (primary) → CoinGecko OHLC (fallback)
- *  - consistent typed output
+ *  - hooks: price-alert checker runs on every fresh snapshot (fire-and-forget)
  *
  * @module lib/modules/market/service
  */
@@ -16,6 +16,7 @@ import { createLogger } from "@/lib/logger";
 import { fetchSnapshot } from "./dexscreener";
 import { fetchHistory as fetchBinanceHistory } from "./binance";
 import { fetchHistory as fetchCoinGeckoHistory, fetchSimplePrice } from "./coingecko";
+import { checkAlerts } from "@/lib/modules/alerts/checker";
 import type { Candle, HistoryData, MarketSnapshot } from "./types";
 
 const log = createLogger("market:service");
@@ -34,6 +35,11 @@ export async function getSnapshot(): Promise<MarketSnapshot> {
         log.warn("price divergence between providers", { dex: snap.priceUsd, cg, divergence });
       }
     }
+    // fire-and-forget: evaluate price alerts against this fresh snapshot
+    // (only fires when the cache actually misses — every MARKET_CACHE_TTL_MS)
+    void checkAlerts(snap.priceUsd).catch((err) =>
+      log.warn("alert checker failed", { err: String(err) }),
+    );
     return snap;
   });
 }
