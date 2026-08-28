@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# template with placeholders only — safe to commit
+!.env.example
 
 # vercel
 .vercel
@@ -52,3 +54,16 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# --- security: never commit real secrets or user data ---
+# local SQLite database (contains real users / payments / sessions)
+/db/*.db
+/db/*.db-journal
+
+# QA screenshots & local artifacts
+/download/
+/tool-results/
+/agent-ctx/
+
+# runtime pid files
+.zscripts/*.pid
