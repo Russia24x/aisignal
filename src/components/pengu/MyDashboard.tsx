@@ -23,6 +23,7 @@ import { useAccount, useBalance } from "wagmi";
 import { useI18n, type Locale } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
 import { useMarket } from "./useMarket";
+import { authFetch } from "@/lib/client-session";
 import { useAbstractProfile } from "@/hooks/useAbstractProfile";
 import { getTierColor } from "@/lib/abstract/profile";
 import { AbstractProfile } from "@/components/abstract/AbstractProfile";
@@ -189,7 +190,7 @@ export function MyDashboard() {
   const query = useQuery<DashboardData>({
     queryKey: ["me-dashboard", entitlements?.address],
     queryFn: async (): Promise<DashboardData> => {
-      const res = await fetch("/api/me/dashboard", { cache: "no-store" });
+      const res = await authFetch("/api/me/dashboard", { cache: "no-store" });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error ?? "ERROR");
       return data.dashboard as DashboardData;

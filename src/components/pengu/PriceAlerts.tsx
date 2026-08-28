@@ -23,6 +23,7 @@ import { Bell, BellOff, BellRing, ChevronDown, History, Loader2, Plus, Trash2, T
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
 import { useMarket, fmt } from "./useMarket";
+import { authFetch } from "@/lib/client-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +55,7 @@ export function PriceAlerts() {
   const alertsQuery = useQuery({
     queryKey: ["alerts"],
     queryFn: async (): Promise<AlertItem[]> => {
-      const r = await fetch("/api/alerts", { cache: "no-store" });
+      const r = await authFetch("/api/alerts", { cache: "no-store" });
       const d = await r.json();
       return d.ok ? (d.alerts as AlertItem[]) : [];
     },
@@ -107,7 +108,7 @@ export function PriceAlerts() {
 
   const createMut = useMutation({
     mutationFn: async (input: { direction: "ABOVE" | "BELOW"; target: number }) => {
-      const r = await fetch("/api/alerts/create", {
+      const r = await authFetch("/api/alerts/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
@@ -129,7 +130,7 @@ export function PriceAlerts() {
 
   const deleteMut = useMutation({
     mutationFn: async (id: string) => {
-      const r = await fetch(`/api/alerts/${id}`, { method: "DELETE" });
+      const r = await authFetch(`/api/alerts/${id}`, { method: "DELETE" });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error ?? "FAILED");
       return d;

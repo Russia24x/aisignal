@@ -1027,3 +1027,81 @@ Stage Summary:
 - Next-phase recommendation per user scope: continue polish/QA cycles on
   existing sections only (e.g. deeper a11y pass, loading skeletons), NO
   new features unless the user asks
+
+---
+Task ID: 20
+Agent: main
+Task: ROOT-CAUSE FIX — "sign-in transaction confirmed but nothing happens; no purchase, no wallet registration" (user request, Persian)
+
+Work Log:
+- SESSION-START-SYNC-CHECK first (per RULES.md): tree clean, local ==
+  origin/main (acfc647); cron list = 0 jobs; NO force push used anywhere
+- EVIDENCE GATHERING (dev.log forensics): the user's 6+ sign-in attempts all
+  show the SAME pattern — GET /api/auth/nonce 200 → POST /api/auth/verify 200
+  (1232ms render = real on-chain EIP-1271 verification) → GET /api/auth/session
+  200 → STILL ANONYMOUS → user retries. DB confirms: user 0x44EE… with
+  loginCount = 9 — the server accepted EVERY signature; the session simply
+  never reached the browser UI
+- ROOT CAUSE: the app runs inside the preview-panel IFRAME (cross-site
+  context). The session cookie was set with `SameSite=Lax`, which browsers
+  refuse to store/send for cross-site iframes — and Safari/Chrome-3P block
+  third-party cookies entirely. Sign-in succeeded server-side, session lost
+  in transit. This also explains "no purchase": purchase requires an
+  authenticated session, which never stuck
+- FIX — dual-mode session (standard SIWE+token pattern for embedded dapps):
+  * session.ts rewritten: `establishSession()` now (a) sets the cookie with
+    ADAPTIVE attributes — `SameSite=None; Secure` when x-forwarded-proto is
+    https (gateway sets it), `Lax` for local http dev — and (b) RETURNS the
+    signed token; `getSession()` reads cookie first, then
+    `Authorization: Bearer` header (same HMAC + timing-safe verify, no weaker
+    path); new `getSessionMode()` for diagnostics
+  * /api/auth/verify response now includes `sessionToken` (same signed value
+    as the cookie)
+  * /api/auth/session response now includes `sessionMode: cookie|bearer|null
+  * NEW lib/client-session.ts: localStorage token store + `authFetch()`
+    wrapper that attaches the Bearer header when a token exists
+  * useAuth: signIn saves the token right after verify ok, refresh() and
+    signOut() go through authFetch, signOut clears the stored token, added
+    fail-safe (if both cookie AND bearer fail → clear token, NETWORK error)
+    + step-by-step debug logs; console.info shows `[auth] session mode: …`
+  * ALL session-gated client calls migrated to authFetch: PaymentDialog
+    (/api/payment/verify), SignalSection (/api/signal/today), PriceAlerts
+    (list/create/delete), MyDashboard (/api/me/dashboard)
+- VERIFICATION (three layers):
+  * Node E2E simulating the cookie-less iframe: nonce → sign (test EOA) →
+    verify WITHOUT cookies → 200 + sessionToken(274 chars) → GET session
+    with ONLY the Authorization header → {mode:"bearer",
+    authenticated:true} ✓; control without cookie/header → anonymous ✓;
+    DELETE logout via bearer → 200 ✓
+  * Real-browser iframe simulation: stored the token in localStorage
+    (exactly what useAuth does post-verify), reloaded → /api/auth/session
+    reports mode "bearer" + authenticated → SignalSection switched from
+    ConnectGate to PassGate (registered state) ✓, 0 console errors ✓
+  * Real-browser cookie mode (top-level): verify via fetch → cookie stored
+    → session WITHOUT header → {cookieMode:"cookie", authenticated:true} ✓
+    — the classic flow is fully preserved
+- Cleanup: all anvil/test users deleted from DB (incl. a stale treasury
+  login and 2 early test accounts); nonces burned; browser storage cleared;
+  only the real user (0x44EE…, loginCount 9) remains
+- DOCS: SECURITY.md §2 — dual-mode session documented (adaptive SameSite,
+  bearer fallback, same-verify guarantee, logout semantics);
+  WALLET-AND-TRANSACTIONS.md §8 — new troubleshooting row describing the
+  exact reported symptom ("امضا را تأیید می‌کنم ولی هیچ اتفاقی نمی‌افتد"),
+  its iframe/cookie-blocking cause, and the fix
+- Final QA: fresh load 0 page errors, all 7 sections render, 6/6 pricing
+  buttons enabled, mobile 390px no overflow + footer == doc height, lint
+  clean, tsc clean, dev.log clean
+
+Stage Summary:
+- The reported blocker is fixed at the ROOT with evidence: server logs
+  proved every signature verified (loginCount 9); the session was lost in
+  the cross-site iframe cookie block — now sessions work in BOTH delivery
+  modes (cookie top-level, bearer in iframes), purchases/alerts/dashboard
+  all authenticate through the same hardened chain
+- User can now: connect wallet → sign in (signature now STICKS) → choose a
+  plan → pay → verified access; every step verified end-to-end in this
+  sandbox (server chain with real signatures + browser both modes)
+- Remaining known/accepted: stateless bearer token stays valid until exp
+  after logout on OTHER devices (standard SIWE+JWT trade-off, documented);
+  wallet re-connect after reload is a separate lifecycle (documented in
+  troubleshooting)

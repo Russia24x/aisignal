@@ -19,6 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
 import { useMarket, fmt } from "./useMarket";
+import { authFetch } from "@/lib/client-session";
 import { PaymentDialog, type PaymentProduct } from "./PaymentDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -112,7 +113,7 @@ export function SignalSection() {
   const signalQuery = useQuery({
     queryKey: ["signal-today", entitlements?.signalAccess],
     queryFn: async (): Promise<{ signal: FullSignal } | { error: string }> => {
-      const res = await fetch("/api/signal/today", { cache: "no-store" });
+      const res = await authFetch("/api/signal/today", { cache: "no-store" });
       const data = await res.json();
       return data.ok ? { signal: data.signal } : { error: data.error ?? "ERROR" };
     },

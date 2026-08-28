@@ -5,7 +5,12 @@
  *
  * Verifies the EIP-4361 message + wallet signature (EOA or EIP-1271 smart
  * wallet like AGW) via the official `verifySiweMessage` chain, creates the
- * user if needed, establishes an HMAC session cookie.
+ * user if needed, establishes the session.
+ *
+ * Response includes the signed session TOKEN alongside the httpOnly cookie:
+ * cookie-blocked contexts (cross-site iframe previews) keep it in
+ * localStorage and send it as `Authorization: Bearer` — see
+ * lib/client-session.ts.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -53,11 +58,14 @@ export async function POST(req: NextRequest) {
     create: { address },
   });
 
-  await establishSession(user.id, address);
+  const { token } = await establishSession(user.id, address);
   log.info("user authenticated", { userId: user.id, address });
 
   return NextResponse.json({
     ok: true,
     user: { id: user.id, address },
+    // Same signed token as the httpOnly cookie — for iframe-embedded
+    // clients where cookies are blocked (standard SIWE+token pattern).
+    sessionToken: token,
   });
 }

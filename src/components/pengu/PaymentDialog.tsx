@@ -21,6 +21,7 @@ import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt 
 import { erc20Abi, parseUnits } from "viem";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
+import { authFetch } from "@/lib/client-session";
 import { publicConfig, formatPengu } from "@/lib/public-config";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -134,7 +135,7 @@ export function PaymentDialog({ product, onClose }: Props) {
       setPhase("verifying");
       setError(null);
       try {
-        const res = await fetch("/api/payment/verify", {
+        const res = await authFetch("/api/payment/verify", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ txHash: hash, product: product.id }),

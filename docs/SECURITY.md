@@ -28,7 +28,10 @@
    - اعتبار nonce در DB (وجود/مصرف‌نشدن/انقضا/تطابق آدرس) — سخت‌گیرانه‌تر از نمونهٔ رسمی (session-cookie)
    - `verifySiweMessage({ blockTag: 'latest' })` با viem مقابل **آدرس اسمارت‌اکانت** — EIP-1271 برای اکانت مستقر، ERC-6492 برای اکانت استقرارنیافته (الگوی رسمی Abstract)
    - burn اتمیک nonce (updateMany با شرط `usedAt: null` → replay غیرممکن)
-4. کوکی سشن HMAC → `httpOnly` + `sameSite=lax` + `secure` در production + TTL ۱۶۸ ساعت
+4. سشن دو حالته (dual-mode):
+   - **کوکی** `pengu_session` → `httpOnly` + SameSite تطبیقی (`None; Secure` روی HTTPS تا در iframe‌های cross-site هم ذخیره شود، `Lax` در dev محلی) + TTL ۱۶۸ ساعت
+   - **Bearer fallback** → همان توکن HMAC-امضاشده در پاسخ `/api/auth/verify` برگردانده می‌شود؛ کلاینت در localStorage نگه می‌دارد و با هدر `Authorization: Bearer` می‌فرستد. برای مرورگرهایی که کوکی شخص ثالث را کلاً مسدود می‌کنند (Safari / Chrome 3P phase-out) و اپ داخل iframe پنل پیش‌نمایش اجرا می‌شود
+   - هر دو مسیر **یک verify یکسان** (HMAC + timing-safe) دارند — مسیر ضعیف‌تری وجود ندارد؛ `/api/auth/session` فیلد `sessionMode` را برای عیب‌یابی برمی‌گرداند
 
 ### توکن سشن
 ```
@@ -37,6 +40,7 @@ payload = { sub, addr, iat, exp, jti }
 ```
 - مقایسهٔ امضا **timing-safe** (`timingSafeEqual`)
 - payload شامل نقش/ادعایی نیست؛ همهٔ entitlements هر بار از DB خوانده می‌شوند (بدون stale privilege)
+- خروج (logout): کوکی سمت سرور پاک + توکن localStorage سمت کلاینت پاک می‌شود (توکن stateless تا انقضای exp معتبر است — همان الگوی استاندارد SIWE+JWT)
 
 ### امضای AGW چرا این‌طور راستی‌آزمایی می‌شود؟
 امضای AGW ساختار EIP-712 (`AGWMessage(bytes32)`) + کدگذاری validator دارد و برای اکانت‌های استقرارنیافته ERC-6492-wrapped است؛ بنابراین ecRecover ساده همیشه نتیجهٔ غلط می‌داد. `verifySiweMessage` رسمی viem این سه حالت را خودش هندل می‌کند. جزئیات: `docs/WALLET-AND-TRANSACTIONS.md §4`.

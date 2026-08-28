@@ -41,6 +41,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAccount, useConnect, useSignMessage } from "wagmi";
 import { useLoginWithAbstract } from "@abstract-foundation/agw-react";
 import { createLogger } from "@/lib/client-logger";
+import { authFetch, saveSessionToken, clearSessionToken } from "@/lib/client-session";
 import type { EntitlementsDTO as Entitlements } from "@/lib/modules/access/passes";
 
 const log = createLogger("auth");
@@ -133,12 +134,19 @@ export function useAuth() {
     error: null,
   });
 
-  /** Fetch current session state from the server. */
+  /** Fetch current session state from the server (cookie OR bearer). */
   const refresh = useCallback(async (): Promise<Entitlements | null> => {
     try {
-      const res = await fetch("/api/auth/session", { cache: "no-store" });
+      // authFetch attaches `Authorization: Bearer` when a stored token
+      // exists — the fallback that keeps sessions alive inside cross-site
+      // iframe previews where browsers block our cookie.
+      const res = await authFetch("/api/auth/session", { cache: "no-store" });
       const data = await res.json();
       if (data.ok) {
+        if (process.env.NODE_ENV !== "production") {
+          // mode diagnostics: "cookie" | "bearer" | null
+          console.info("[auth] session mode:", data.sessionMode ?? "anonymous");
+        }
         setState((s) => ({ ...s, loading: false, entitlements: data.entitlements }));
         return data.entitlements as Entitlements;
       }
@@ -199,6 +207,7 @@ export function useAuth() {
         const nonceRes = await fetch(`/api/auth/nonce?address=${address}`);
         const nonceData = await nonceRes.json();
         if (!nonceData.ok) return fail(classifyError(null, nonceData.error ?? "NONCE_FAILED"));
+        log.debug("nonce issued, requesting wallet signature…");
 
         // Step 2: sign the exact server-controlled message (click gesture).
         let signature: string;
@@ -207,6 +216,7 @@ export function useAuth() {
         } catch (sigErr) {
           return fail(classifyError(sigErr));
         }
+        log.debug("signature received, verifying server-side…");
 
         // Step 3 (official shape): POST { message, signature } for
         // parseSiweMessage + verifySiweMessage (EIP-1271 aware) server-side.
@@ -218,7 +228,18 @@ export function useAuth() {
         const verifyData = await verifyRes.json();
         if (!verifyData.ok) return fail(classifyError(null, verifyData.error ?? "VERIFY_FAILED"));
 
-        await refresh();
+        // Step 4: keep the signed session token for cookie-blocked contexts
+        // (cross-site iframe previews) — authFetch sends it as Bearer.
+        if (verifyData.sessionToken) saveSessionToken(verifyData.sessionToken);
+        log.debug("verified — refreshing entitlements…");
+
+        const ent = await refresh();
+        if (!ent?.authenticated) {
+          // Extremely unlikely (both cookie AND bearer failed) — clear the
+          // stored token so the next attempt starts clean.
+          clearSessionToken();
+          return fail("NETWORK");
+        }
         setState((s) => ({ ...s, signingIn: false, error: null }));
         return { ok: true };
       } catch (err) {
@@ -234,9 +255,10 @@ export function useAuth() {
   // The Header / SignalSection CTAs cover the connected-but-signed-out
   // state — `needsSignIn` below tells the UI when to highlight them.
 
-  /** Full logout: server session + wallet disconnect. */
+  /** Full logout: server session + stored token + wallet disconnect. */
   const signOut = useCallback(async () => {
-    await fetch("/api/auth/session", { method: "DELETE" }).catch(() => undefined);
+    await authFetch("/api/auth/session", { method: "DELETE" }).catch(() => undefined);
+    clearSessionToken();
     setState({ loading: false, entitlements: null, signingIn: false, error: null });
     await refresh();
     walletLogout();
