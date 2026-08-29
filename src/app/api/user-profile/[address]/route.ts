@@ -12,7 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/security/rate-limit";
-import { isValidAddress, avatarAssetUrl, PORTAL_PROFILE_BASE, type AbstractProfileData } from "@/lib/abstract/profile";
+import { isValidAddress, avatarAssetUrl, normalizeBadgeIcon, safeHttpUrl, PORTAL_PROFILE_BASE, type AbstractProfileData } from "@/lib/abstract/profile";
 
 const PORTAL_API = "https://backend.portal.abs.xyz/api";
 const CACHE_S_MAXAGE = 300; // 5 min, matches the official reusable
@@ -79,8 +79,12 @@ export async function GET(
     const raw = (await res.json()) as { user?: RawPortalUser };
     const user = raw.user ?? {};
 
+    // Portal override pictures are user-controlled: only accept absolute
+    // http(s) URLs, else fall back to the generated tier asset (a relative or
+    // malformed override would 404 against OUR origin, same bug class as
+    // badge icon slugs).
     const avatarSrc =
-      user.overrideProfilePictureUrl ||
+      safeHttpUrl(user.overrideProfilePictureUrl) ||
       avatarAssetUrl(
         user.avatar?.tier ?? 1,
         user.avatar?.key ?? 1,
@@ -92,7 +96,8 @@ export async function GET(
       id: b.badge!.id ?? 0,
       type: b.badge!.type ?? "",
       name: b.badge!.name ?? "",
-      icon: b.badge!.icon ?? "",
+      // Portal sends icon SLUGS ("twitter", …) — never render them as <img src>.
+      ...normalizeBadgeIcon(b.badge!.icon),
       description: b.badge!.description ?? "",
       url: b.badge!.url,
     }));

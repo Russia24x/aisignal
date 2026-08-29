@@ -15,6 +15,10 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  // Dev only: allow HMR/_next resource requests from the sandbox preview
+  // proxy (preview-chat-*.space-z.ai). Without this, Next 15 dev warns on
+  // every cross-origin _next fetch and may block Fast Refresh assets.
+  allowedDevOrigins: ["*.space-z.ai"],
 };
 
 export default nextConfig;

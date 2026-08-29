@@ -16,7 +16,10 @@ export interface PortalBadge {
   id: number;
   type: string;
   name: string;
-  icon: string;
+  /** Absolute https URL only — Portal slugs are never URLs (see normalizeBadgeIcon). */
+  iconUrl: string | null;
+  /** Sanitized Portal icon slug (e.g. "twitter") for client-side icon mapping. */
+  iconSlug: string | null;
   description: string;
   url?: string;
 }
@@ -53,4 +56,41 @@ export function isValidAddress(value: string): boolean {
 /** Construct the generated avatar asset URL, mirroring the official component. */
 export function avatarAssetUrl(tier: number, key: number, season: number): string {
   return `https://abstract-assets.abs.xyz/avatars/${tier}-${key}-${season}.png`;
+}
+
+/** Accept only well-formed absolute http(s) URLs from Portal-provided values. */
+export function safeHttpUrl(raw: string | null | undefined): string | null {
+  const value = (raw ?? "").trim();
+  if (!/^https?:\/\//i.test(value)) return null;
+  try {
+    return new URL(value).toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Normalize a raw Portal badge "icon" value.
+ *
+ * The Portal API returns icon *slugs* ("twitter", "the-trader", …), not URLs —
+ * there is no public badge-icon CDN. Rendering a slug as <img src> makes the
+ * browser request e.g. GET /twitter on OUR origin → 404 noise in the console
+ * for every claimed badge. Split the value into:
+ *  - iconUrl:  absolute http(s) URL if (and only if) the value is one
+ *  - iconSlug: sanitized slug ([a-z0-9-], ≤40 chars) for client icon mapping
+ */
+export function normalizeBadgeIcon(
+  raw: string | null | undefined,
+): { iconUrl: string | null; iconSlug: string | null } {
+  const value = (raw ?? "").trim();
+  if (!value) return { iconUrl: null, iconSlug: null };
+
+  const iconUrl = safeHttpUrl(value);
+  if (iconUrl) return { iconUrl, iconSlug: null };
+
+  const slug = value.toLowerCase();
+  if (/^[a-z0-9][a-z0-9-]{0,39}$/.test(slug)) {
+    return { iconUrl: null, iconSlug: slug };
+  }
+  return { iconUrl: null, iconSlug: null };
 }

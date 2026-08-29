@@ -51,15 +51,36 @@ import {
   Fuel,
   History,
   Loader2,
+  Mail,
   Medal,
+  MessageCircle,
   RefreshCw,
   Sparkles,
+  ThumbsUp,
+  TrendingUp,
+  Twitter,
   UserRound,
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* --------------------------- types --------------------------- */
+
+/**
+ * Portal badge icon slugs → lucide icons.
+ * The Portal API returns icon slugs (verified against the public
+ * /api/badge catalog) and ships no icon CDN, so we map the full known
+ * set here; unknown slugs fall back to a Medal.
+ */
+const BADGE_SLUG_ICONS = {
+  twitter: Twitter,
+  discord: MessageCircle,
+  "fund-account": Wallet,
+  "app-voter": ThumbsUp,
+  "the-trader": TrendingUp,
+  "email-notification": Mail,
+  wrapped: Sparkles,
+} as const;
 
 type DashboardEntitlements = EntitlementsDTO;
 
@@ -487,26 +508,31 @@ function IdentityWalletPanel({
         {profile && profile.badges.length > 0 && (
           <TooltipProvider delayDuration={200}>
             <div className="flex items-center gap-1.5" dir="ltr">
-              {profile.badges.slice(0, 5).map((b) => (
-                <Tooltip key={b.id}>
-                  <TooltipTrigger asChild>
-                    <span
-                      className="grid size-8 place-items-center overflow-hidden rounded-full bg-muted/60 ring-1 ring-border/60 transition-transform hover:scale-110"
-                      role="img"
-                      aria-label={b.name}
-                    >
-                      {b.icon ? (
-                        <img src={b.icon} alt={b.name} className="size-full object-cover" loading="lazy" />
-                      ) : (
-                        <Medal className="size-3.5 text-muted-foreground" />
-                      )}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs">
-                    <p className="font-medium">{b.name}</p>
-                  </TooltipContent>
-                </Tooltip>
-              ))}
+              {profile.badges.slice(0, 5).map((b) => {
+                const SlugIcon = b.iconSlug ? BADGE_SLUG_ICONS[b.iconSlug as keyof typeof BADGE_SLUG_ICONS] : undefined;
+                return (
+                  <Tooltip key={b.id}>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="grid size-8 place-items-center overflow-hidden rounded-full bg-muted/60 ring-1 ring-border/60 transition-transform hover:scale-110"
+                        role="img"
+                        aria-label={b.name}
+                      >
+                        {b.iconUrl ? (
+                          <img src={b.iconUrl} alt={b.name} className="size-full object-cover" loading="lazy" />
+                        ) : SlugIcon ? (
+                          <SlugIcon className="size-3.5 text-muted-foreground" />
+                        ) : (
+                          <Medal className="size-3.5 text-muted-foreground" />
+                        )}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      <p className="font-medium">{b.name}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
               {profile.badgeCount > profile.badges.length && (
                 <Badge variant="secondary" className="font-mono text-[10px]">
                   +{profile.badgeCount - profile.badges.length}
