@@ -35,6 +35,17 @@ export function PriceChart() {
   const up = prices.length > 1 && prices[prices.length - 1] >= prices[0];
   const color = up ? "var(--buy)" : "var(--sell)";
 
+  // visible-window range summary (Low / High / current position percentile)
+  const range = useMemo(() => {
+    if (prices.length < 2) return null;
+    const low = Math.min(...prices);
+    const high = Math.max(...prices);
+    const last = prices[prices.length - 1];
+    const span = high - low;
+    const pos = span > 0 ? Math.round(((last - low) / span) * 100) : 50;
+    return { low, high, last, pos };
+  }, [prices]);
+
   return (
     <section id="chart" className="scroll-mt-20 px-4 py-8">
       <div className="mx-auto max-w-6xl">
@@ -42,18 +53,44 @@ export function PriceChart() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-black">PENGU / USD</h2>
-              <p className="text-xs text-muted-foreground">{t("chart.price")} · CoinGecko OHLC</p>
+              <p className="text-xs text-muted-foreground">
+                {t("chart.price")} · CoinGecko OHLC · {mode === "daily" ? t("chart.dailyRange") : t("chart.hourlyRange")}
+              </p>
             </div>
-            <Tabs value={mode} onValueChange={(v) => setMode(v as "daily" | "hourly")}>
-              <TabsList className="h-9">
-                <TabsTrigger value="daily" className="text-xs font-bold">
-                  {t("chart.daily")} · 90d
-                </TabsTrigger>
-                <TabsTrigger value="hourly" className="text-xs font-bold">
-                  {t("chart.hourly")} · 48h
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+            <div className="flex flex-wrap items-center gap-2">
+              {range && (
+                <div
+                  className="hidden items-center gap-2 rounded-full border border-border/60 bg-background/40 px-3 py-1 font-mono text-[11px] sm:flex"
+                  dir="ltr"
+                  aria-label={`${t("chart.low")} ${fmt.price(range.low)}, ${t("chart.high")} ${fmt.price(range.high)}`}
+                >
+                  <span className="text-sell">
+                    {t("chart.low")} {fmt.price(range.low)}
+                  </span>
+                  <span className="text-muted-foreground/40" aria-hidden>·</span>
+                  <span className="text-buy">
+                    {t("chart.high")} {fmt.price(range.high)}
+                  </span>
+                  <span className="text-muted-foreground/40" aria-hidden>·</span>
+                  <span
+                    className="font-semibold text-primary"
+                    title={t("chart.position")}
+                  >
+                    {range.pos}%
+                  </span>
+                </div>
+              )}
+              <Tabs value={mode} onValueChange={(v) => setMode(v as "daily" | "hourly")}>
+                <TabsList className="h-9">
+                  <TabsTrigger value="daily" className="text-xs font-bold">
+                    {t("chart.daily")} · 90d
+                  </TabsTrigger>
+                  <TabsTrigger value="hourly" className="text-xs font-bold">
+                    {t("chart.hourly")} · 48h
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
           </div>
           {loading || chartData.length < 2 ? (
             <Skeleton className="h-72 w-full rounded-xl" />

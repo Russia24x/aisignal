@@ -24,6 +24,7 @@ import { TrackRecord } from "@/components/pengu/TrackRecord";
 import { EngineSection } from "@/components/pengu/EngineSection";
 import { FaqSection, Footer } from "@/components/pengu/FaqFooter";
 import { Reveal } from "@/components/pengu/Reveal";
+import { BackToTop } from "@/components/pengu/BackToTop";
 
 export default function Home() {
   return (
@@ -31,6 +32,7 @@ export default function Home() {
       {/* ambient background layers */}
       <div className="aurora-bg" aria-hidden />
       <div className="ice-grid" aria-hidden />
+      <div className="noise-overlay" aria-hidden />
 
       <Header />
       <LiveTicker />
@@ -60,6 +62,7 @@ export default function Home() {
       </main>
 
       <Footer />
+      <BackToTop />
     </div>
   );
 }

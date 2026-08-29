@@ -263,12 +263,18 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "refresh": "Refresh",
-    "language": "Language"
+    "language": "Language",
+    "backToTop": "Back to top"
   },
   "chart": {
     "daily": "Daily",
     "hourly": "Hourly",
-    "price": "Price (USD)"
+    "price": "Price (USD)",
+    "low": "Low",
+    "high": "High",
+    "position": "Current position",
+    "dailyRange": "90-day range",
+    "hourlyRange": "48-hour range"
   },
   "dashboard": {
     "title": "My Dashboard",

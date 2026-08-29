@@ -13,6 +13,7 @@
  *
  * @module components/pengu/LiveTicker
  */
+import { useEffect, useState } from "react";
 import { useMarket, fmt } from "./useMarket";
 import { cn } from "@/lib/utils";
 import { ArrowDown, ArrowUp, RefreshCw } from "lucide-react";
@@ -22,17 +23,23 @@ interface StatProps {
   value: string;
   tone?: "up" | "down" | "neutral";
   icon?: "up" | "down" | null;
+  /** Retrigers the tick flash animation when it changes ("up" | "down" | null). */
+  flash?: "up" | "down" | null;
 }
 
-function Stat({ label, value, tone = "neutral", icon = null }: StatProps) {
+function Stat({ label, value, tone = "neutral", icon = null, flash = null }: StatProps) {
+  // key on flash so the animation restarts on every direction change
   return (
     <span className="flex items-center gap-1.5">
       <span className="text-muted-foreground/70">{label}</span>
       <span
+        key={flash ?? "static"}
         className={cn(
-          "font-semibold tabular-nums",
+          "font-semibold tabular-nums rounded px-1 -mx-1",
           tone === "up" && "text-buy",
           tone === "down" && "text-sell",
+          flash === "up" && "tick-up",
+          flash === "down" && "tick-down",
         )}
       >
         {icon === "up" && <ArrowUp className="inline size-3 align-middle" />}
@@ -59,6 +66,23 @@ export function LiveTicker() {
   const fetchedAt = rest?.fetchedAt ?? null;
   // live = a fresh REST snapshot is rendering (auto-poll every 60s)
   const live = !!rest && !market.error;
+
+  // --- price pulse: flash the PRICE stat when a poll moves the number ---
+  // Render-time state adjustment (React-recommended pattern, no effect needed
+  // for the comparison itself; only the delayed clear runs in an effect).
+  const [lastPrice, setLastPrice] = useState<number | null>(null);
+  const [flash, setFlash] = useState<"up" | "down" | null>(null);
+  if (price !== null && lastPrice !== price) {
+    if (lastPrice !== null) {
+      setFlash(price > lastPrice ? "up" : "down");
+    }
+    setLastPrice(price);
+  }
+  useEffect(() => {
+    if (flash === null) return;
+    const t = setTimeout(() => setFlash(null), 900);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   const hasData = price !== null;
   const positive = (change24h ?? 0) >= 0;
@@ -92,7 +116,7 @@ export function LiveTicker() {
 
         {hasData ? (
           <div className="flex shrink-0 items-center gap-3">
-            <Stat label="PRICE" value={fmt.price(price)} />
+            <Stat label="PRICE" value={fmt.price(price)} flash={flash} />
             <Sep />
             <Stat
               label="24H"

@@ -1604,3 +1604,63 @@ Stage Summary:
   overlay (2-3%) to prevent OLED banding, gamified onboarding roadmap
   in the empty state; alert delivery (email/Telegram) still awaiting an
   outbound-channel decision from the owner
+
+---
+Task ID: 27
+Agent: main
+Task: Scheduled assessment round — CRITICAL env fix (.env truncated → all APIs 500) + "Live Feedback & Micro-Delight" package (ticker price pulse, BackToTop progress ring, noise overlay, chart range chips)
+
+Work Log:
+- SESSION-START-SYNC-CHECK: tree clean, HEAD a306f7f = origin/main+1 (unpushed),
+  no force push. Tasks 23-26 fixes/features confirmed present in history
+- STATUS ASSESSMENT FIRST: dev.log showed EVERY API route 500 with
+  "Invalid environment configuration" — root cause: /home/z/my-project/.env
+  was truncated (mtime Aug 29 09:28) to a single DATABASE_URL line; all other
+  vars (SESSION_SECRET, NEXT_PUBLIC_CHAIN_ID/RPC_URL/EXPLORER_URL/PENGU_TOKEN/
+  TREASURY, rate limits, i18n) were gone
+- FIX: restored full .env from .env.example values (abs DATABASE_URL kept);
+  Next.js hot-reloaded env — market/session/history/preview/agw-details all
+  back to 200 WITHOUT a server restart; today's signal auto-generated
+  (2026-08-29 BUY) once the engine could run again
+- QA (pre-feature): fresh browser, 0 page/console errors, 9 sections;
+  golden-path regression PASSED (plan click → real portal.abs.xyz login
+  redirect with correct requester params); FAQ accordion single-open OK;
+  locale FA↔EN OK (lang+dir+content); mobile 390px zero overflow
+- NOTE: Radix dropdown needs native pointerdown — synthetic el.click()
+  won't open the locale menu; use agent-browser native click on fresh refs
+- Dev server process found dead mid-round (connection refused despite clean
+  log tail) → restarted with nohup bun run dev, 200 in ~9s
+- NEW LiveTicker price pulse: render-time state adjustment (React pattern,
+  satisfies react-hooks/set-state-in-effect lint rule — the ref+effect
+  version failed lint) compares polled price vs last; PRICE stat flashes
+  green/red (tick-up/tick-down now also scale 1.07, cubic-bezier pop) for
+  900ms on every real movement; key-based animation retrigger
+- NEW BackToTop.tsx: floating 44px button, appears past 90% viewport +
+  >8% progress, circular SVG progress ring fills with scroll, smooth scroll
+  (instant under prefers-reduced-motion), RTL-safe end-4 corner, iOS
+  safe-area inset, focus-visible ring, active scale, zIndex below modals
+- NEW .noise-overlay: fixed inline-SVG feTurbulence film grain (~2.5%
+  opacity) — kills OLED gradient banding on the aurora background, zero
+  network cost, pointer-events-none, mounted in page.tsx ambient stack
+- NEW chart range chips: PriceChart header shows visible-window Low (sell
+  red) / High (buy green) / current-position percentile (primary) in a
+  mono pill, LTR-locked, aria-label carries full summary, subtitle now
+  names the active window (90-day / 48-hour); hidden <sm to protect tabs
+- i18n: +7 keys fa + 7 en (chart.low/high/position/dailyRange/hourlyRange,
+  common.backToTop)
+- QA (post-feature): lint clean, tsc exit 0; noise div in DOM; BackToTop
+  visible+full-ring at page bottom, click → scrollY 0 + auto-hide; chips
+  render live data (کف $0.00576 · سقف $0.00990 · 78%); golden-path
+  regression PASSED again post-changes; mobile 390px no overflow, BackToTop
+  at y=780 above safe area; dev.log clean, 0 page errors
+
+Stage Summary:
+- Site was DOWN (all APIs 500 from truncated .env) — restored in minutes,
+  zero data loss; watch for env-file truncation on sandbox restarts
+  (candidate cause: platform restart at 09:28)
+- Delight layer shipped: the page now visibly reacts to every price poll
+  (flash+pop), long pages get a progress-ring elevator, chart header
+  answers "where are we in the range?" at a glance, OLED banding gone
+- Next-phase candidates: price-alert delivery channel decision still
+  pending from owner; gamified onboarding roadmap in TrackRecord empty
+  state; mini sparkline in LiveTicker; PWA manifest + install prompt

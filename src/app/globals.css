@@ -181,6 +181,18 @@
   mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black 40%, transparent 100%);
 }
 
+/* Film-grain noise overlay (~2.5%) — kills OLED gradient banding.
+   Inline SVG feTurbulence, tileable, zero network cost. */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: -8;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+
 /* Glass card */
 .glass-card {
   @apply rounded-2xl border border-border/70 bg-card backdrop-blur-xl;
@@ -189,15 +201,15 @@
 
 /* Price tick flash */
 @keyframes tick-up {
-  0% { background-color: oklch(0.72 0.16 165 / 0.25); }
-  100% { background-color: transparent; }
+  0% { background-color: oklch(0.72 0.16 165 / 0.3); transform: scale(1.07); }
+  100% { background-color: transparent; transform: scale(1); }
 }
 @keyframes tick-down {
-  0% { background-color: oklch(0.68 0.19 18 / 0.25); }
-  100% { background-color: transparent; }
+  0% { background-color: oklch(0.68 0.19 18 / 0.3); transform: scale(1.07); }
+  100% { background-color: transparent; transform: scale(1); }
 }
-.tick-up { animation: tick-up 0.8s ease-out; }
-.tick-down { animation: tick-down 0.8s ease-out; }
+.tick-up { animation: tick-up 0.8s cubic-bezier(0.22, 1, 0.36, 1); }
+.tick-down { animation: tick-down 0.8s cubic-bezier(0.22, 1, 0.36, 1); }
 
 /* Gentle float for the mascot */
 @keyframes floaty {

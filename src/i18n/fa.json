@@ -263,12 +263,18 @@
     "cancel": "انصراف",
     "confirm": "تأیید",
     "refresh": "به‌روزرسانی",
-    "language": "زبان"
+    "language": "زبان",
+    "backToTop": "بازگشت به بالا"
   },
   "chart": {
     "daily": "روزانه",
     "hourly": "ساعتی",
-    "price": "قیمت (USD)"
+    "price": "قیمت (USD)",
+    "low": "کف",
+    "high": "سقف",
+    "position": "موقعیت کنونی",
+    "dailyRange": "بازه ۹۰ روزه",
+    "hourlyRange": "بازه ۴۸ ساعته"
   },
   "dashboard": {
     "title": "داشبورد من",
