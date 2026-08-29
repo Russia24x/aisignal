@@ -1777,3 +1777,52 @@ Stage Summary:
 - Next-phase candidates: USDC.e enablement decision; per-isolate nonce
   burn via Cloudflare Cache API; PWA manifest; signal alert delivery
   channel decision still pending from owner
+
+---
+Task ID: 29
+Agent: main
+Task: Diagnose the 5× 404s from the user's browser console (twitter / discord / the-trader / email-notification / app-voter)
+
+Work Log:
+- User pasted console logs from the live preview: auth session resolved
+  (anonymous → cookie), then bursts of 404s for /twitter /discord
+  /the-trader /email-notification /app-voter right after dashboard load
+- dev.log confirmed the same five GETs 404'd on the Next router (compiled
+  /_not-found/page); grep proved NO such strings exist in our codebase
+- Timing correlation: requests fired immediately after
+  GET /api/user-profile/0x60Df4E… (the treasury wallet = owner "Peyman24x")
+- Live probe of backend.portal.abs.xyz/api/user/address/… → badge.icon is a
+  RELATIVE SLUG ("twitter", "discord", "the-trader", "email-notification",
+  "app-voter"), not a URL; MyDashboard.tsx:499 rendered <img src={b.icon}>
+  → browser resolved the slug against OUR origin → 404 per claimed badge
+- Probed 6 candidate icon-CDN patterns (abstract-assets/badges/*.png|svg,
+  assets.abs.xyz, portal hosts) → all 404: no public badge-icon CDN exists
+- Enumerated the full Portal badge catalog via /api/badge → exactly 7 slugs
+  (discord, twitter, fund-account, app-voter, the-trader, email-notification,
+  wrapped)
+- FIX (server): normalizeBadgeIcon() in lib/abstract/profile.ts splits raw
+  icon into iconUrl (absolute http(s) ONLY, future-proof) + iconSlug
+  (sanitized [a-z0-9-]{1,40}); safeHttpUrl() also guards the user-controlled
+  overrideProfilePictureUrl avatar (same bug class — relative override would
+  404 against our origin; now falls back to the generated tier asset)
+- FIX (client): MyDashboard maps all 7 known slugs → lucide icons
+  (Twitter/MessageCircle/Wallet/ThumbsUp/TrendingUp/Mail/Sparkles) with Medal
+  fallback; <img> is now rendered only for genuine absolute URLs
+- FIX (dev config): allowedDevOrigins: ["*.space-z.ai"] in next.config.ts —
+  kills the Next 15 dev cross-origin _next warning from the sandbox preview
+- QA: tsc PASS, eslint PASS on all 4 touched files; live route returns the
+  new shape (5 badges → iconSlug set, iconUrl null, avatar still resolves
+  the valid seadn.io override); replay-guard suite ALL PASS; headless
+  browser load: 0 page errors, 0 console errors, 0 404s
+- Committed d0548f7 → pushed origin/main (4 files, +99/−24)
+
+Stage Summary:
+- Root cause of the console 404 spam: Abstract Portal ships badge icons as
+  slugs with no CDN; frontend rendered them as <img src> → 5× 404 against
+  our origin for a fully-badged wallet. Fixed end-to-end (server
+  normalization + client slug→lucide map); console is now clean
+- Hardened the whole Portal-asset pipeline (badges + avatar override) with
+  one consistent absolute-URL-only rule
+- Note for owner: the earlier "purchase impossible" issue (Task 28) remains
+  solved — this log session shows no new payment attempts, only the badge
+  404s; auth session cookie mode works as designed
