@@ -11,6 +11,9 @@ import { guard } from "@/lib/security/rate-limit";
 import { getSession } from "@/lib/security/session";
 import { scanPayments } from "@/lib/modules/access/restore";
 import { passForAmount } from "@/lib/modules/access/passes";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("payment:history");
 
 export async function GET(req: NextRequest) {
   const limited = guard(req, "payment");
@@ -23,21 +26,29 @@ export async function GET(req: NextRequest) {
 
   try {
     const payments = await scanPayments(session.addr, 45);
-    return NextResponse.json({
-      ok: true,
-      payments: [...payments]
-        .reverse()
-        .map((p) => ({
-          txHash: p.txHash,
-          token: p.token,
-          product: passForAmount(p.amountToken)?.id ?? null,
-          amountToken: p.amountToken,
-          status: "VERIFIED",
-          verifiedAt: new Date(p.blockTimestamp).toISOString(),
-        })),
-    });
-  } catch {
-    // RPC hiccup — an empty list is honest and the UI degrades gracefully
-    return NextResponse.json({ ok: true, payments: [] });
+    return NextResponse.json(
+      {
+        ok: true,
+        payments: [...payments]
+          .reverse()
+          .map((p) => ({
+            txHash: p.txHash,
+            token: p.token,
+            product: passForAmount(p.amountToken)?.id ?? null,
+            amountToken: p.amountToken,
+            status: "VERIFIED",
+            verifiedAt: new Date(p.blockTimestamp).toISOString(),
+          })),
+      },
+      { headers: { "cache-control": "no-store" } },
+    );
+  } catch (err) {
+    // RPC hiccup: an empty list is honest for the UI, but flag the
+    // degradation so “no payments” is never confused with “scan worked”
+    log.warn("scan failed — serving degraded empty list", { err: String(err) });
+    return NextResponse.json(
+      { ok: true, payments: [], degraded: true },
+      { headers: { "cache-control": "no-store" } },
+    );
   }
 }

@@ -16,7 +16,11 @@ export async function GET(req: NextRequest) {
   // `sessionMode` tells the client (and QA) whether the session arrived via
   // cookie or via the Bearer fallback — invaluable when debugging embedded
   // (iframe) previews where cookies are blocked.
-  return NextResponse.json({ ok: true, entitlements, sessionMode: mode });
+  return NextResponse.json(
+    { ok: true, entitlements, sessionMode: mode },
+    // per-user data — never cacheable by a shared CDN/proxy
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 export async function DELETE(req: NextRequest) {

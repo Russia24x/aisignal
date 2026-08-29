@@ -43,6 +43,9 @@ import {
   looksLikeAgwDetails,
   type AgwProviderDetails,
 } from "@/lib/agw-details";
+import { createLogger } from "@/lib/client-logger";
+
+const log = createLogger("agw-bridge");
 
 /** URL fragment that uniquely identifies the AGW provider-details request. */
 const DETAILS_URL_RE = /\/api\/v1\/apps\/[^/]+\/cross-app\/details/;
@@ -223,9 +226,7 @@ export function installAgwBridge(): void {
     // 5) Bundled public constants — this request can no longer fail, so the
     //    SDK never dead-ends on a filtered network again.
     cacheDetails(AGW_DETAILS_FALLBACK);
-    console.warn(
-      "[agw-bridge] provider-details served from bundled constants (upstream + proxy unreachable)",
-    );
+    log.warn("provider-details served from bundled constants (upstream + proxy unreachable)");
     return syntheticDetailsResponse(AGW_DETAILS_FALLBACK);
   };
 
@@ -251,10 +252,9 @@ export function installAgwBridge(): void {
     const reason = e.reason as (Error & { [k: string]: unknown }) | undefined;
     const tagged = reason && typeof reason === "object" && reason[BRIDGE_TAG] === true;
     if (tagged) {
-      console.warn(
-        "[agw-bridge] contained SDK warm-up rejection:",
-        reason instanceof Error ? reason.message : reason,
-      );
+      log.warn("contained SDK warm-up rejection", {
+        reason: reason instanceof Error ? reason.message : String(reason),
+      });
       e.preventDefault();
     }
   });

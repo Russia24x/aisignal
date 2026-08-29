@@ -37,7 +37,7 @@
  *
  * @module lib/security/siwe
  */
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   createPublicClient,
   http,
@@ -57,7 +57,7 @@ import { createLogger } from "@/lib/logger";
 const log = createLogger("auth:siwe");
 
 /** How long a prepared sign-in message stays valid. */
-const MESSAGE_TTL_MS = 10 * 60 * 1000;
+export const MESSAGE_TTL_MS = 10 * 60 * 1000;
 /** Sanity ceiling for a message expirationTime (guards far-future clocks). */
 const MAX_MESSAGE_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -118,6 +118,13 @@ interface NonceTicket {
 
 const HEX_RE = /^[0-9a-f]+$/;
 
+/** Constant-time MAC comparison (same pattern as session.ts). */
+function macEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
 /**
  * Parse & verify a self-authenticating nonce against the claiming address.
  * Returns null when the MAC is wrong (not minted by us / wrong binding),
@@ -137,7 +144,7 @@ function verifyNonceTicket(nonce: string, claimAddress: string): NonceTicket | n
   const sigBuf = Buffer.from(sig, "hex").toString("base64url");
   const expected = mac(`${random}.${issuedAt}.${claimAddress.toLowerCase()}`);
   const expectedUnbound = mac(`${random}.${issuedAt}.`);
-  if (sigBuf !== expected && sigBuf !== expectedUnbound) return null;
+  if (!macEquals(sigBuf, expected) && !macEquals(sigBuf, expectedUnbound)) return null;
   if (Date.now() - issuedAt > MESSAGE_TTL_MS) return null; // expired
   if (Date.now() < issuedAt - 5 * 60 * 1000) return null; // clock skew
   return { issuedAt };

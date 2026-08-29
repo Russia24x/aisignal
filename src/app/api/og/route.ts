@@ -59,13 +59,13 @@ const SVG = `<?xml version="1.0" encoding="UTF-8"?>
 
   <!-- subtitle -->
   <text x="80" y="416" font-family="ui-sans-serif, system-ui, sans-serif" font-size="26" font-weight="500" fill="#9ab2bc">
-    11 technical indicator families · real market data · on-chain payments
+    5-factor engine, 4 timeframes · real market data · on-chain payments
   </text>
 
   <!-- stats row -->
   <g transform="translate(80, 470)">
     <g>
-      <text x="0" y="20" font-family="ui-monospace, monospace" font-size="12" font-weight="700" fill="#9ab2bc" letter-spacing="1.5">RSI · MACD · BOLLINGER · OBV · VWAP +7 MORE</text>
+      <text x="0" y="20" font-family="ui-monospace, monospace" font-size="12" font-weight="700" fill="#9ab2bc" letter-spacing="1.5">TREND · MOMENTUM · MACD · RSI · VOLUME</text>
     </g>
   </g>
 

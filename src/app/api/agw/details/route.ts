@@ -39,10 +39,13 @@ const UPSTREAM_TIMEOUT_MS = 5_000;
 let cache: { json: AgwProviderDetails; at: number } | null = null;
 
 function respond(json: AgwProviderDetails, source: "cache" | "upstream" | "fallback") {
+  // NOTE: the `source` is intentionally NOT exposed as a response header —
+  // it reveals server-side network reachability (ops info) to outsiders;
+  // it is only logged server-side.
+  void source;
   return NextResponse.json(json, {
     headers: {
       "cache-control": "public, max-age=300, stale-while-revalidate=3600",
-      "x-agw-details-source": source,
     },
   });
 }

@@ -9,10 +9,6 @@ export type Timeframe = "15m" | "1h" | "4h" | "1d";
 
 export const TIMEFRAMES: readonly Timeframe[] = ["15m", "1h", "4h", "1d"] as const;
 
-export function isTimeframe(x: string): x is Timeframe {
-  return (TIMEFRAMES as readonly string[]).includes(x);
-}
-
 /** Live snapshot of the PENGU market. Assembled from Binance (price/24h),
  *  DexScreener (Abstract pair liquidity/FDV/short-term changes) with
  *  CoinGecko / CoinMarketCap as fallbacks. */
@@ -61,12 +57,4 @@ export interface TimeframeData {
   /** provider that produced the series */
   source: string;
   fetchedAt: number;
-}
-
-/** Errors carrying HTTP-ish semantics for API mapping. */
-export class MarketDataError extends Error {
-  constructor(message: string, public code: string) {
-    super(message);
-    this.name = "MarketDataError";
-  }
 }

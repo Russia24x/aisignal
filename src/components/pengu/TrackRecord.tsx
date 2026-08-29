@@ -238,6 +238,17 @@ export function TrackRecord() {
                       <TableRow
                         key={it.day}
                         onClick={() => setDetailDay(it.day)}
+                        // keyboard access: rows act as buttons opening the day
+                        // detail (Enter/Space) — not mouse-only anymore
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${t("track.detailTitle")} — ${it.day}`}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setDetailDay(it.day);
+                          }
+                        }}
                         className="cursor-pointer snap-start text-xs transition-colors hover:bg-primary/5 focus-visible:bg-primary/10 focus-visible:outline-none"
                       >
                         <TableCell className="font-mono font-semibold">{it.day}</TableCell>
@@ -353,7 +364,9 @@ function WinRateRing({
           strokeDashoffset={C - (pct / 100) * C}
           style={{
             transition: "stroke-dashoffset 1s cubic-bezier(0.22, 1, 0.36, 1)",
-            filter: `drop-shadow(0 0 6px ${color}55)`,
+            // color-mix — alpha suffixes ("var(--x)55") are invalid CSS and
+            // silently kill the whole filter
+            filter: `drop-shadow(0 0 6px color-mix(in srgb, ${color} 45%, transparent))`,
           }}
         />
       </svg>
@@ -429,7 +442,11 @@ function EquityCurve({ points }: { points: CurvePoint[] }) {
           strokeWidth="2.2"
           strokeLinejoin="round"
           strokeLinecap="round"
-          style={{ filter: `drop-shadow(0 0 4px ${path.positive ? "var(--buy)" : "var(--sell)"}44)` }}
+          style={{
+            filter: `drop-shadow(0 0 4px color-mix(in srgb, ${
+              path.positive ? "var(--buy)" : "var(--sell)"
+            } 27%, transparent))`,
+          }}
         />
         {/* end-point marker */}
         <circle cx={path.lastX} cy={path.lastY} r="3.4" fill={stroke} />

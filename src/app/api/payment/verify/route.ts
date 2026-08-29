@@ -61,19 +61,16 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // stacking: a new pass extends the current entitlement when still active
+    // stacking + replay guard: pass the FULL current claim — verifyPayment
+    // rejects payments not strictly newer than the claim's paidAt
     const current = currentClaim(session);
-    const currentExpiry =
-      current && (current.lifetime || current.expiresAt > Date.now())
-        ? current.expiresAt
-        : undefined;
 
     const result = await verifyPayment({
       txHash,
       userAddress: session.addr,
       product,
       quote,
-      currentExpiry,
+      currentClaim: current,
     });
     if (!result.ok) {
       const status =
@@ -87,6 +84,7 @@ export async function POST(req: NextRequest) {
       expiresAt: result.entitlement!.expiresAt,
       lifetime: result.entitlement!.lifetime,
       txHash: result.entitlement!.txHash,
+      paidAt: result.entitlement!.paidAt,
       mintedAt: Date.now(),
     });
     if (!minted) {

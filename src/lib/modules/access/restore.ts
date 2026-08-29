@@ -27,7 +27,7 @@ import { createPublicClient, http, numberToHex, type PublicClient, type Log, typ
 import { TTLCache } from "@/lib/cache";
 import { serverConfig, publicConfig } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
-import { passForAmount, isLifetimePass, LIFETIME_GRANT_DAYS, DAY_MS } from "./passes";
+import { passForAmountRaw, isLifetimePass, LIFETIME_GRANT_DAYS, DAY_MS } from "./passes";
 import { PAY_TOKENS, fromBaseUnits, TRANSFER_TOPIC } from "./tokens";
 import type { EntitlementClaim } from "@/lib/security/session";
 
@@ -46,6 +46,9 @@ export interface OnChainPayment {
   txHash: string;
   token: string;
   amountToken: number;
+  /** raw base-unit amount (bigint — exact, no float rounding) */
+  amountRaw: bigint;
+  decimals: number;
   blockNumber: number;
   blockTimestamp: number; // ms
 }
@@ -113,6 +116,7 @@ export async function scanPayments(
     const found: OnChainPayment[] = [];
     let to = latest;
     let guard = 0;
+    let guardTripped = false;
     while (guard++ < 40) {
       const fromB = to > chunk ? to - chunk : 0n;
       let chunkLogs: Log[] = [];
@@ -136,6 +140,8 @@ export async function scanPayments(
           txHash: l.transactionHash.toLowerCase(),
           token: tokenDef.key,
           amountToken: fromBaseUnits(amountRaw, tokenDef.decimals),
+          amountRaw,
+          decimals: tokenDef.decimals,
           blockNumber: Number(l.blockNumber),
           blockTimestamp: await blockTimestamp(l.blockNumber),
         });
@@ -144,6 +150,16 @@ export async function scanPayments(
       const chunkStartTs = await blockTimestamp(fromB === 0n ? 1n : fromB);
       if (chunkStartTs < cutoff || fromB === 0n) break;
       to = fromB - 1n;
+      if (guard >= 40) guardTripped = true;
+    }
+    if (guardTripped) {
+      // the lookback window needs more chunks than the guard allows — the
+      // scan is INCOMPLETE. Log loudly so ops can raise the chunk size.
+      log.warn("restore scan hit the chunk guard before the cutoff", {
+        wallet: from,
+        lookbackDays,
+        chunks: guard - 1,
+      });
     }
     found.sort((a, b) => a.blockTimestamp - b.blockTimestamp);
     log.info("treasury scan complete", {
@@ -160,20 +176,32 @@ export async function scanPayments(
  * Replay on-chain payments chronologically with stacking semantics and
  * derive the best entitlement — exactly what verifyPayment would have
  * minted for each payment at the time.
+ *
+ * Pass mapping is PENGU-only: pass prices are PENGU-denominated and only
+ * PENGU amounts can be mapped without a signed quote. Amount matching is
+ * done in raw bigints (no float threshold drift).
  */
 export function computeEntitlement(payments: OnChainPayment[]): EntitlementClaim | null {
   let expiry = 0;
+  let lifetime = false;
+  let lastPaidAt = 0;
   let best: EntitlementClaim | null = null;
   for (const p of payments) {
-    const pass = passForAmount(p.amountToken);
+    // only PENGU payments map to passes — other tokens had a signed quote
+    // at pay time and cannot be replay-mapped from a raw scan
+    if (p.token !== "PENGU" || p.decimals !== 18) continue;
+    const pass = passForAmountRaw(p.amountRaw, p.decimals);
     if (!pass) continue; // below the cheapest pass — not a pass payment
     const grantDays = pass.days ?? LIFETIME_GRANT_DAYS;
     expiry = Math.max(expiry, p.blockTimestamp) + grantDays * DAY_MS;
+    lifetime = lifetime || isLifetimePass(pass.id);
+    lastPaidAt = p.blockTimestamp;
     best = {
       product: pass.id,
       expiresAt: expiry,
-      lifetime: isLifetimePass(pass.id),
+      lifetime,
       txHash: p.txHash,
+      paidAt: lastPaidAt,
       mintedAt: Date.now(),
     };
   }

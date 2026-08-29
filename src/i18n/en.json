@@ -1,14 +1,8 @@
 {
   "brand": {
-    "name": "PenguSignals",
-    "tagline": "Smart PENGU signals on Abstract Chain"
+    "name": "PenguSignals"
   },
   "nav": {
-    "market": "Market",
-    "signal": "Today's Signal",
-    "engine": "Engine",
-    "trackRecord": "Track Record",
-    "faq": "FAQ",
     "connect": "Connect Wallet",
     "disconnect": "Disconnect",
     "dashboard": "Dashboard"
@@ -16,7 +10,6 @@
   "hero": {
     "badge": "Built on Abstract blockchain",
     "title1": "Buy & Sell Signals for",
-    "title2": "PENGU",
     "subtitle": "A multi-layer technical analysis engine — RSI, MACD, Bollinger, volume flow and 7 more indicators — runs on real market data every day and tells you: buy, sell, or wait.",
     "ctaPrimary": "Get today's signal",
     "ctaSecondary": "Explore the engine",
@@ -138,7 +131,20 @@
     "alreadyPaid": "Already paid? Enter the transaction hash",
     "payWith": "Pay with",
     "quoteNote": "Live conversion rate locked in (valid 30 minutes)",
-    "manualPenguOnly": "The manual path supports PENGU payments only; ETH payments must be sent from this browser."
+    "manualPenguOnly": "The manual path supports PENGU payments only; ETH payments must be sent from this browser.",
+    "TX_NOT_FOUND": "This transaction was not found on the Abstract network. If you sent PENGU from an exchange or another chain (Solana/Ethereum), it cannot be verified here — payment must be a transfer on Abstract from this connected wallet. If you just sent it, wait a few seconds and press verify again.",
+    "TX_ALREADY_USED": "This transaction has already been used to activate a pass.",
+    "payDisabledReason": "Fund your wallet first to enable the Pay button (guide below)",
+    "fund": {
+      "title": "Your wallet is empty on Abstract — fund it",
+      "step1": "From the Abstract Portal, deposit or bridge PENGU to your connected wallet (Abstract network, chain 2741).",
+      "step2": "Keep a tiny amount of ETH for gas too (unless you pay with ETH).",
+      "openPortal": "Open Abstract Portal",
+      "copyAddress": "Copy my wallet address",
+      "swap": "Buy / swap PENGU on DexScreener",
+      "wrongChain": "PENGU sent from Solana, Ethereum, or exchanges (on other networks) cannot be verified — only an Abstract-network transfer from the connected wallet counts.",
+      "autoRefresh": "Balances refresh every 12s — the Pay button enables itself once funds land."
+    }
   },
   "products": {
     "choose": "Choose plan",
@@ -255,7 +261,6 @@
     "signInDesc": "Sign this message with your wallet to create a secure session.",
     "signing": "Waiting for signature…",
     "signFailed": "Signature failed",
-    "welcome": "Welcome",
     "error": {
       "RATE_LIMITED": "Too many attempts — wait a moment and try again",
       "SIGNATURE_REJECTED": "Signature request rejected",
@@ -267,16 +272,10 @@
     }
   },
   "common": {
-    "loading": "Loading…",
     "error": "Something went wrong",
     "retry": "Retry",
     "close": "Close",
-    "copy": "Copy",
     "copied": "Copied!",
-    "cancel": "Cancel",
-    "confirm": "Confirm",
-    "refresh": "Refresh",
-    "language": "Language",
     "backToTop": "Back to top",
     "day": "day"
   },
@@ -302,8 +301,6 @@
     "noPayments": "No payments yet",
     "notAvailable": "—",
     "refresh": "Refresh",
-    "loading": "Loading…",
-    "portalIdentity": "Abstract Portal identity",
     "noPortalProfile": "No Portal profile yet — create one at abs.xyz",
     "viewOnPortal": "View on Portal",
     "tier.1": "Bronze",

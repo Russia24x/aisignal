@@ -23,6 +23,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { I18nProvider } from "@/components/i18n/I18nProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/components/pengu/AuthProvider";
+import { MarketProvider } from "@/components/pengu/useMarket";
 import { publicConfig } from "@/lib/public-config";
 import { installAgwBridge } from "@/lib/agw-bridge";
 
@@ -51,8 +52,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
               reads this one instance — sign-in / payment / connect anywhere
               updates every section live, no reload needed. */}
           <AuthProvider>
-            {children}
-            <Toaster position="top-center" closeButton richColors />
+            {/* SINGLE shared market poller: one /api/market/overview request
+                per minute for the whole app (was 9 parallel pollers). */}
+            <MarketProvider>
+              {children}
+              <Toaster position="top-center" closeButton richColors />
+            </MarketProvider>
           </AuthProvider>
         </AbstractWalletProvider>
       </ThemeProvider>

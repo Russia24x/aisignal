@@ -22,13 +22,13 @@
  *
  * @module lib/modules/access/payments
  */
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { createPublicClient, http, type PublicClient, type Log } from "viem";
 import { serverConfig, publicConfig } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
-import { getSnapshot } from "../market/service";
 import { passById, isLifetimePass, LIFETIME_GRANT_DAYS, DAY_MS } from "./passes";
 import { payTokenByKey, payTokenByAddress, toBaseUnits, fromBaseUnits, TRANSFER_TOPIC, type PayTokenKey } from "./tokens";
+import type { EntitlementClaim } from "@/lib/security/session";
 
 const log = createLogger("payments");
 
@@ -72,6 +72,13 @@ export function buildQuote(product: string, token: PayTokenKey, amountToken: num
   };
 }
 
+/** Constant-time MAC comparison (same pattern as session.ts). */
+function macEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
 /** Verify a signed quote: our MAC, right product/token, fresh enough. */
 function verifyQuote(
   quote: SignedQuote,
@@ -88,7 +95,7 @@ function verifyQuote(
   const decimals = payTokenByKey(token)?.decimals ?? 18;
   const amountRaw = toBaseUnits(Number(quote.amountToken), decimals);
   const expected = quoteMac(product, token, amountRaw.toString(), Number(quote.quotedAt));
-  if (expected !== quote.sig) return { ok: false, amountRaw: null };
+  if (!macEquals(expected, quote.sig)) return { ok: false, amountRaw: null };
   return { ok: true, amountRaw };
 }
 
@@ -199,27 +206,36 @@ export interface VerifyPaymentResult {
     expiresAt: number; // epoch ms
     lifetime: boolean;
     txHash: string;
+    /** block timestamp of the payment (replay guard for future verifies) */
+    paidAt: number;
   };
 }
 
 /**
  * Verify a payment and derive the entitlement — no storage anywhere.
  *
+ * REPLAY GUARD (stateless): the current claim records `paidAt` (the block
+ * timestamp of the newest payment already consumed). A submitted payment
+ * only mints/extends when it is STRICTLY NEWER than the claim's paidAt (or
+ * there is no active claim) — re-submitting the same tx hash can never
+ * stack the pass. Old sessions without `paidAt` fail validation and simply
+ * re-establish on the next sign-in.
+ *
  * @param params.txHash         the payment transaction
  * @param params.userAddress    the session wallet (must be the sender)
  * @param params.product        the product being purchased (PASS_*)
  * @param params.quote          signed quote (required for non-PENGU tokens)
- * @param params.currentExpiry  current entitlement expiry (stacking support);
- *                              pass undefined for a fresh computation
+ * @param params.currentClaim   the session's current entitlement claim
+ *                              (stacking + replay guard); omit for fresh
  */
 export async function verifyPayment(params: {
   txHash: string;
   userAddress: string;
   product: string;
   quote?: SignedQuote;
-  currentExpiry?: number;
+  currentClaim?: EntitlementClaim | null;
 }): Promise<VerifyPaymentResult> {
-  const { txHash, userAddress, product, quote, currentExpiry } = params;
+  const { txHash, userAddress, product, quote, currentClaim } = params;
   const normalized = txHash.toLowerCase();
 
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) return { ok: false, error: "INVALID_TX_HASH" };
@@ -262,8 +278,22 @@ export async function verifyPayment(params: {
     const block = await rpc().getBlock({ blockNumber: check.blockNumber! });
     return Number(block.timestamp) * 1000;
   })());
+
+  // 4. REPLAY GUARD: only a strictly-newer payment may mint or extend.
+  //    Without this, re-submitting one confirmed tx while a pass is active
+  //    would stack `currentExpiry + grantDays` on every replay.
+  if (currentClaim) {
+    const claimActive = currentClaim.lifetime || currentClaim.expiresAt > Date.now();
+    if (normalized === currentClaim.txHash || (claimActive && blockTimestampMs <= currentClaim.paidAt)) {
+      return { ok: false, error: "TX_ALREADY_USED" };
+    }
+  }
+
   const grantDays = pass.days ?? LIFETIME_GRANT_DAYS;
-  const base = Math.max(blockTimestampMs, currentExpiry ?? 0);
+  const stackBase = currentClaim && (currentClaim.lifetime || currentClaim.expiresAt > Date.now())
+    ? currentClaim.expiresAt
+    : 0;
+  const base = Math.max(blockTimestampMs, stackBase);
   const expiresAt = base + grantDays * DAY_MS;
 
   const amountToken = fromBaseUnits(amountRaw, tokenDef.decimals);
@@ -282,15 +312,11 @@ export async function verifyPayment(params: {
     entitlement: {
       product,
       expiresAt,
-      lifetime: isLifetimePass(product),
+      // once lifetime, always lifetime (a later smaller payment must not
+      // downgrade the flag even though it re-mints the claim)
+      lifetime: isLifetimePass(product) || !!currentClaim?.lifetime,
       txHash: normalized,
+      paidAt: blockTimestampMs,
     },
   };
-}
-
-/** Live PENGU price (USD) — used to build payment quotes. */
-export async function fetchPenguUsd(): Promise<number> {
-  const snap = await getSnapshot();
-  if (!snap.priceUsd || snap.priceUsd <= 0) throw new Error("NO_PENGU_PRICE");
-  return snap.priceUsd;
 }

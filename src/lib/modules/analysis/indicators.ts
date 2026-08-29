@@ -140,18 +140,6 @@ export function atr(highs: number[], lows: number[], closes: number[], period = 
   return out;
 }
 
-/** Standard deviation of simple returns (periods). */
-export function returnsStdDev(closes: number[], period = 20): number | null {
-  if (closes.length < period + 1) return null;
-  const rets: number[] = [];
-  for (let i = closes.length - period; i < closes.length; i++) {
-    rets.push((closes[i] - closes[i - 1]) / closes[i - 1]);
-  }
-  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
-  const variance = rets.reduce((a, r) => a + (r - mean) ** 2, 0) / rets.length;
-  return Math.sqrt(variance);
-}
-
 /** Rate of Change over `period` candles (percent). */
 export function roc(closes: number[], period = 10): number | null {
   if (closes.length <= period) return null;

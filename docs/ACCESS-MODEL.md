@@ -46,6 +46,7 @@ Cloudflare Worker ✅  In-memory Cache ✅  AGW ✅  Public APIs ✅  Treasury �
 - **PENGU:** ترانسفر دقیق به خزانه؛ سرور مقدار را با کاتالوگ مطابقت می‌دهد
 - **ETH:** `/api/payment/config` کوت امضاشده برمی‌گرداند (`product|token|amountRaw|quotedAt` زیر HMAC)؛ verify با تحمل ۳٪ اسلیپیج نسبت به کوت
 - **انقضای پاس از timestamp بلاک** محاسبه می‌شود؛ replay تراکنش قدیمی پاس منقضی می‌دهد، نه آینده
+- **گارد replay در claim (v4.1)**: claim فیلد `paidAt` (timestamp بلاک آخرین پرداخت) دارد؛ تکرار همان tx یا tx قدیمی‌تر از `paidAt` هنگام فعال بودن پاس → `TX_ALREADY_USED` (پیش‌تر، replay همان tx روی پاسِ فعال باعث انباشت بی‌نهایت می‌شد — انباشت فقط با پرداخت واقعیِ جدید ممکن است)
 
 ## جریان خرید
 

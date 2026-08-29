@@ -55,17 +55,38 @@ interface Detail {
   priceChangePct: number | null;
 }
 
-const cache = new Map<string, Detail | "ERROR">();
+interface ErrorEntry {
+  kind: "ERROR";
+  /** transient errors expire — a later re-open retries instead of showing
+   *  a stale failure forever (one network blip must not break a day) */
+  at: number;
+}
+
+const cache = new Map<string, Detail | ErrorEntry>();
+const ERROR_TTL_MS = 30_000;
+
+function getCacheEntry(day: string): Detail | "ERROR" | undefined {
+  const e = cache.get(day);
+  if (e && typeof e === "object" && "kind" in e) {
+    // ErrorEntry — expire stale failures so a later re-open retries
+    if (Date.now() - e.at > ERROR_TTL_MS) {
+      cache.delete(day);
+      return undefined;
+    }
+    return "ERROR";
+  }
+  return e as Detail | undefined;
+}
 
 export function SignalDetailDialog({ day, onClose }: { day: string | null; onClose: () => void }) {
   const { t, locale } = useI18n();
-  const initial = day ? cache.get(day) : undefined;
+  const initial = day ? getCacheEntry(day) : undefined;
   const [detail, setDetail] = useState<Detail | null>(initial && initial !== "ERROR" ? initial : null);
   const [failed, setFailed] = useState(initial === "ERROR");
 
   useEffect(() => {
     if (!day) return;
-    const cached = cache.get(day);
+    const cached = getCacheEntry(day);
     if (cached === "ERROR") {
       // deferred to the next frame — no synchronous cascading render
       const raf = requestAnimationFrame(() => {
@@ -94,11 +115,14 @@ export function SignalDetailDialog({ day, onClose }: { day: string | null; onClo
             cache.set(day, d.signal);
             setDetail(d.signal);
           } else {
-            cache.set(day, "ERROR");
+            // 4xx from the API (bad day, paywalled) is a REAL error — cache
+            // it briefly so rapid re-clicks don't refetch, but let it expire
+            cache.set(day, { kind: "ERROR", at: Date.now() });
             setFailed(true);
           }
         })
         .catch(() => {
+          // network failure — do NOT cache at all (retry on next open)
           if (alive) setFailed(true);
         });
     });

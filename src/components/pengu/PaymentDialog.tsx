@@ -14,6 +14,13 @@
  *     non-PENGU payments include the signed quote)
  *  5. success → session refresh (entitlements update reactively)
  *
+ * FUNDING GUIDANCE (the "I can't buy" fix): brand-new AGW wallets arrive
+ * with 0 PENGU and 0 ETH on Abstract. Instead of a silently-disabled Pay
+ * button, the dialog detects an insufficient balance and renders an
+ * actionable funding panel (portal link, wallet-address copy, swap link,
+ * wrong-chain warning) while the balances auto-refresh every 12s — so the
+ * moment the user funds the wallet, the Pay button comes alive.
+ *
  * Security: the client never claims anything — it only submits a tx hash;
  * verification happens entirely server-side against the Abstract RPC.
  *
@@ -21,7 +28,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useBalance, useWriteContract, useSendTransaction, useWaitForTransactionReceipt } from "wagmi";
-import { erc20Abi, parseUnits, formatUnits } from "viem";
+import { erc20Abi, parseUnits } from "viem";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
 import { authFetch } from "@/lib/client-session";
@@ -31,7 +38,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle, CheckCircle2, Copy, ExternalLink, Loader2, ShieldCheck, Wallet } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Fuel,
+  Loader2,
+  RefreshCw,
+  ShieldCheck,
+  Wallet,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface PaymentProduct {
@@ -52,6 +69,13 @@ interface PaymentConfig {
   tokens: { key: TokenKey; kind: "erc20" | "native"; address: string | null; decimals: number; symbol: string }[];
   quotes: Record<string, Record<string, { amountToken: number; quote: unknown }>>;
 }
+
+/** Abstract Portal — AGW users manage/deposit their wallet here. */
+const PORTAL_URL = "https://portal.abs.xyz";
+/** Deepest PENGU pair (for buying/bridging PENGU on Abstract). */
+const DEXSCREENER_PENGU_URL = "https://dexscreener.com/abstract/token/0x9eBe3A824Ca958e4b3Da772D2065518F009CBa62";
+/** Balances re-poll while the funding panel is open (ms). */
+const BALANCE_REFETCH_MS = 12_000;
 
 /** Classify a failed wallet send (AGW popup semantics + RPC errors). */
 function classifySendError(err: unknown): string {
@@ -85,6 +109,7 @@ export function PaymentDialog({ product, onClose }: Props) {
   const [txHash, setTxHash] = useState("");
   const [manualHash, setManualHash] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   // "already paid" path: reveal the manual tx-hash input without sending
   // from this browser (e.g. the user transferred from the Abstract Portal).
   const [showManual, setShowManual] = useState(false);
@@ -92,15 +117,23 @@ export function PaymentDialog({ product, onClose }: Props) {
   const [tokenKey, setTokenKey] = useState<TokenKey>("PENGU");
   const [config, setConfig] = useState<PaymentConfig | null>(null);
 
-  // fetch payment config (token registry + signed quotes) when a product opens
+  // fetch payment config (token registry + signed quotes) when a product
+  // opens — with an abort guard so rapid product switches can't install a
+  // STALE quote from a resolved-out-of-order response
   useEffect(() => {
     if (!product) return;
     setTokenKey("PENGU");
     setConfig(null);
-    fetch("/api/payment/config")
+    const controller = new AbortController();
+    fetch("/api/payment/config", { signal: controller.signal })
       .then((r) => r.json())
-      .then((d) => setConfig(d.ok ? d : null))
-      .catch(() => setConfig(null));
+      .then((d) => {
+        if (!controller.signal.aborted) setConfig(d.ok ? d : null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setConfig(null);
+      });
+    return () => controller.abort();
   }, [product]);
 
   const ethQuote = useMemo(() => {
@@ -112,6 +145,9 @@ export function PaymentDialog({ product, onClose }: Props) {
     address,
     token: publicConfig.penguToken,
     chainId: publicConfig.chainId,
+    // auto-refresh while the user funds the wallet — the Pay button flips
+    // on the moment the transfer lands, without a dialog reopen
+    query: { refetchInterval: BALANCE_REFETCH_MS },
   });
 
   // Native ETH balance — used for payment (native path) AND gas (ERC-20 path):
@@ -119,6 +155,7 @@ export function PaymentDialog({ product, onClose }: Props) {
   const { data: ethBalance } = useBalance({
     address,
     chainId: publicConfig.chainId,
+    query: { refetchInterval: BALANCE_REFETCH_MS },
   });
   const lowGas = ethBalance !== undefined && ethBalance.value <= 0n;
 
@@ -141,9 +178,13 @@ export function PaymentDialog({ product, onClose }: Props) {
   const activeBalance = tokenKey === "PENGU" ? penguBalance?.value : ethBalance?.value;
   const balanceOk = useMemo(() => {
     if (!required || activeBalance === undefined) return true;
-    const decimals = tokenKey === "PENGU" ? 18 : 18;
-    return activeBalance >= parseUnits(String(required.amount), decimals);
-  }, [activeBalance, required, tokenKey]);
+    return activeBalance >= parseUnits(String(required.amount), 18);
+  }, [activeBalance, required]);
+  // the balance is KNOWN to be short (not just still loading)
+  const insufficient = required !== null && activeBalance !== undefined && !balanceOk;
+  // nothing to send at all → the funding panel is the main affordance
+  const walletEmpty =
+    activeBalance !== undefined && activeBalance <= 0n && (ethBalance === undefined || ethBalance.value <= 0n);
 
   /** Trigger the payment from the connected wallet (ERC-20 or native). */
   const pay = useCallback(async () => {
@@ -231,6 +272,13 @@ export function PaymentDialog({ product, onClose }: Props) {
 
   const explorerTx = (hash: string) => `${publicConfig.explorerUrl}/tx/${hash}`;
 
+  const copyAddress = () => {
+    if (!address) return;
+    navigator.clipboard?.writeText(address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+
   if (!product) return null;
 
   const tokens: TokenKey[] = (config?.tokens ?? [{ key: "PENGU" } as { key: TokenKey }])
@@ -239,7 +287,7 @@ export function PaymentDialog({ product, onClose }: Props) {
 
   return (
     <Dialog open={!!product} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="glass-card max-w-md border-border/70 sm:max-w-lg" dir="auto">
+      <DialogContent className="glass-card max-h-[90vh] overflow-y-auto max-w-md border-border/70 sm:max-w-lg" dir="auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg font-extrabold">
             <Wallet className="size-5 text-primary" />
@@ -279,6 +327,7 @@ export function PaymentDialog({ product, onClose }: Props) {
                           type="button"
                           onClick={() => setTokenKey(k)}
                           disabled={k === "ETH" && !ethQuote}
+                          aria-pressed={tokenKey === k}
                           className={cn(
                             "px-3 py-1 text-xs font-bold transition-colors",
                             tokenKey === k
@@ -306,7 +355,7 @@ export function PaymentDialog({ product, onClose }: Props) {
                     {tokenKey === "PENGU"
                       ? `${formatPengu(penguBalance?.value)} PENGU`
                       : `${formatEth(ethBalance?.value)} ETH`}
-                    {!balanceOk && ` — ${t("payment.insufficient")}`}
+                    {insufficient && ` — ${t("payment.insufficient")}`}
                   </span>
                 }
               />
@@ -335,12 +384,58 @@ export function PaymentDialog({ product, onClose }: Props) {
                   </span>
                 }
               />
-              {lowGas && (
-                <p className="text-[11px] font-semibold leading-5 text-sell">
-                  ⚠ {t("payment.noGas")}
-                </p>
-              )}
             </div>
+
+            {/* FUNDING PANEL — the "I can't buy" fix: instead of a dead
+                disabled button, give the user everything needed to fund
+                the wallet right now. Shown when the KNOWN balance is short
+                (or the wallet is empty / out of gas). */}
+            {(insufficient || walletEmpty || (lowGas && tokenKey === "PENGU")) && phase === "idle" && (
+              <div className="space-y-3 rounded-xl border border-hold/40 bg-hold/5 p-4">
+                <div className="flex items-center gap-2 text-sm font-extrabold text-hold">
+                  <Fuel className="size-4" />
+                  {t("payment.fund.title")}
+                </div>
+                <ol className="list-inside list-decimal space-y-1.5 text-xs leading-6 text-muted-foreground">
+                  <li>{t("payment.fund.step1")}</li>
+                  <li>{t("payment.fund.step2")}</li>
+                </ol>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button
+                    onClick={() => window.open(PORTAL_URL, "_blank", "noopener,noreferrer")}
+                    className="gap-1.5 text-xs font-bold"
+                    size="sm"
+                  >
+                    <ExternalLink className="size-3.5" />
+                    {t("payment.fund.openPortal")}
+                  </Button>
+                  <Button
+                    onClick={copyAddress}
+                    variant="outline"
+                    className="gap-1.5 text-xs font-bold"
+                    size="sm"
+                  >
+                    {copied ? <CheckCircle2 className="size-3.5 text-buy" /> : <Copy className="size-3.5" />}
+                    {copied ? t("common.copied") : t("payment.fund.copyAddress")}
+                  </Button>
+                </div>
+                <a
+                  href={DEXSCREENER_PENGU_URL}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                >
+                  {t("payment.fund.swap")} <ExternalLink className="size-3" />
+                </a>
+                <p className="rounded-lg border border-sell/30 bg-sell/5 p-2 text-[11px] leading-5 text-sell">
+                  ⚠ {t("payment.fund.wrongChain")}
+                </p>
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <RefreshCw className="size-3 animate-spin [animation-duration:3s]" />
+                  {t("payment.fund.autoRefresh")}
+                </p>
+              </div>
+            )}
 
             {/* step 1: pay */}
             <Button
@@ -348,6 +443,7 @@ export function PaymentDialog({ product, onClose }: Props) {
               disabled={phase === "sending" || phase === "sent" || !balanceOk || !required}
               className="w-full gap-2 text-base font-bold"
               size="lg"
+              title={!balanceOk && required ? t("payment.payDisabledReason") : undefined}
             >
               {phase === "sending" ? (
                 <>
@@ -361,6 +457,11 @@ export function PaymentDialog({ product, onClose }: Props) {
                 </>
               )}
             </Button>
+            {!balanceOk && required && (
+              <p className="-mt-2 text-center text-[11px] font-semibold text-sell">
+                {t("payment.payDisabledReason")}
+              </p>
+            )}
 
             {/* already-paid path: paste a tx hash sent from anywhere */}
             {phase === "idle" && !showManual && (

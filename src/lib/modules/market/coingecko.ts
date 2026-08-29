@@ -55,44 +55,21 @@ async function fetchJson<T>(url: string, timeoutMs: number, retries = 3): Promis
 /** OHLC entry: [timestamp, open, high, low, close] */
 type OhlcEntry = [number, number, number, number, number];
 
-/** market_chart entry prices: [timestamp, price] ; volumes: [timestamp, volume] */
-interface MarketChart {
-  prices: [number, number][];
-  total_volumes: [number, number][];
-}
-
 /**
- * Fetch raw points for the last `days` (with volumes merged from
- * market_chart) — source granularity depends on `days` (see header).
+ * Fetch raw points for the last `days` — source granularity depends on
+ * `days` (see header).
+ *
+ * VOLUME IS INTENTIONALLY ZERO on this path: market_chart's
+ * `total_volumes` are ROLLING 24h samples — merging them onto candles
+ * gives every candle ≈ the same rolling value, which poisons the volume
+ * factor. Binance (primary) carries true per-candle volume; this fallback
+ * trades volume for price continuity, and the engine treats v=0 as
+ * “no signal” rather than a collapse.
  */
 async function fetchOhlc(days: number): Promise<Candle[]> {
   const url = `${BASE}/coins/${COIN_ID}/ohlc?vs_currency=usd&days=${days}`;
   const raw = await fetchJson<OhlcEntry[]>(url, serverConfig.DATA_FETCH_TIMEOUT_MS);
-  // Each entry: [ts, o, h, l, c]. Volume comes separately → merge from market_chart.
-  let volumes = new Map<number, number>();
-  try {
-    const chart = await fetchJson<MarketChart>(
-      `${BASE}/coins/${COIN_ID}/market_chart?vs_currency=usd&days=${days}`,
-      serverConfig.DATA_FETCH_TIMEOUT_MS,
-    );
-    volumes = new Map(chart.total_volumes.map(([t, v]) => [t, v]));
-  } catch (err) {
-    log.warn("volume fetch failed, candles will carry zero volume", { err: String(err) });
-  }
-
-  const candles: Candle[] = raw.map(([t, o, h, l, c]) => {
-    // find nearest volume sample
-    let v = 0;
-    let best = Infinity;
-    for (const [vt, vv] of volumes) {
-      const d = Math.abs(vt - t);
-      if (d < best) {
-        best = d;
-        v = vv;
-      }
-    }
-    return { t, o, h, l, c, v };
-  });
+  const candles: Candle[] = raw.map(([t, o, h, l, c]) => ({ t, o, h, l, c, v: 0 }));
   return candles.sort((a, b) => a.t - b.t);
 }
 

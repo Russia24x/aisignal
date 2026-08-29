@@ -2,7 +2,8 @@
 
 /**
  * PriceChart — interactive daily/hourly price chart (recharts).
- * Data: server-provided real candles (CoinGecko OHLC).
+ * Data: server-provided real candles (Binance klines primary, CoinGecko
+ * fallback) via /api/market/overview.
  *
  * @module components/pengu/PriceChart
  */

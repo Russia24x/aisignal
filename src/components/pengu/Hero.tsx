@@ -16,7 +16,7 @@ import { ArrowDown, LineChart, RefreshCw, Snowflake } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Hero() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { data, loading, refresh } = useMarket();
 
   const s = data?.snapshot;
@@ -102,7 +102,7 @@ export function Hero() {
             {s ? (
               <>
                 {t("hero.updated")}{" "}
-                {new Date(s.fetchedAt).toLocaleTimeString(localeTime(t), {
+                {new Date(s.fetchedAt).toLocaleTimeString(locale === "fa" ? "fa-IR" : "en-US", {
                   hour: "2-digit",
                   minute: "2-digit",
                 })}
@@ -141,11 +141,6 @@ export function Hero() {
       </div>
     </section>
   );
-}
-
-function localeTime(t: (k: string) => string): string {
-  // fa → fa-IR numerals with Persian digits handled by Intl
-  return t("brand.name").includes("پنگو") ? "fa-IR" : "en-US";
 }
 
 /* ------------------------------------------------------------------ */

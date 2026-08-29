@@ -38,6 +38,33 @@ import type { Timeframe } from "../market/types";
 
 const log = createLogger("signal:service");
 
+/** Timeframe → candle interval (ms) — used to detect the open candle. */
+const TF_INTERVAL_MS: Record<Timeframe, number> = {
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+};
+
+/**
+ * Drop the still-open (in-progress) candle from a series.
+ *
+ * WHY: Binance's latest kline is the current, still-forming candle. Feeding
+ * it to the engine biases the volume factor (a 30-second-old candle looks
+ * like a volume collapse) and makes RSI/MACD wobble tick-by-tick. History
+ * replay only ever sees CLOSED candles — the live signal must match that
+ * semantics or “today” and its replay diverge.
+ */
+function closedOnly(candles: Candle[], tf: Timeframe): Candle[] {
+  const interval = TF_INTERVAL_MS[tf];
+  const now = Date.now();
+  const last = candles[candles.length - 1];
+  if (last && last.t + interval > now) {
+    return candles.slice(0, -1);
+  }
+  return candles;
+}
+
 /** Live composite signal — cached at the shortest TF TTL (freshness ladder). */
 const currentCache = new TTLCache<EngineOutput>(serverConfig.timeframeTtlMs["15m"]);
 
@@ -85,11 +112,12 @@ export async function getCurrentSignal(): Promise<EngineOutput> {
     ]);
     const engine = runEngine({
       timeframes: {
-        "15m": tf15.candles,
-        "1h": tf1h.candles,
-        "4h": tf4h.candles,
-        "1d": tf1d.candles,
+        "15m": closedOnly(tf15.candles, "15m"),
+        "1h": closedOnly(tf1h.candles, "1h"),
+        "4h": closedOnly(tf4h.candles, "4h"),
+        "1d": closedOnly(tf1d.candles, "1d"),
       },
+      // the live ticker price (not the open candle's close) drives display
       price: snapshot.priceUsd,
     });
     log.info("signal computed", {

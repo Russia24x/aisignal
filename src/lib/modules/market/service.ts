@@ -189,20 +189,3 @@ export async function getDailySeries(): Promise<Candle[]> {
     return fetchCgTimeframe("1d");
   });
 }
-
-export interface CandleWindow {
-  candles: Candle[];
-  dataQuality: number;
-}
-
-/**
- * Candle window trimmed to `maxCount`; dataQuality penalizes short
- * histories (indicator warm-up).
- */
-export function analysisWindow(candles: Candle[], maxCount: number): CandleWindow {
-  const window = candles.slice(-maxCount);
-  const minForQuality = 60;
-  const dataQuality =
-    window.length >= minForQuality ? 1 : Math.max(0.4, window.length / minForQuality);
-  return { candles: window, dataQuality };
-}

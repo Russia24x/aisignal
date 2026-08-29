@@ -60,7 +60,10 @@ export async function GET(req: NextRequest) {
         candlesUsed: engine.timeframes["4h"].candlesUsed,
       },
       entitlements: ent,
-    });
+      // the PAID product — explicit no-store so a shared CDN/proxy can
+      // never cache a per-user paid payload (belt & suspenders on top of
+      // `dynamic = "force-dynamic"`)
+    }, { headers: { "cache-control": "no-store" } });
   } catch (err) {
     const msg = String(err);
     if (msg.includes("INSUFFICIENT_HISTORY")) {

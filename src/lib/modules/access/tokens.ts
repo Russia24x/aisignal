@@ -14,9 +14,14 @@
  * are still fully verifiable by tx hash.
  *
  * Registry data is server+client safe (addresses are public by nature).
+ * The PENGU contract address is derived from the SAME env-driven config
+ * the client uses (public-config) — a single source of truth, so a
+ * testnet/mainnet switch cannot desync “what users pay” from “what the
+ * verifier scans”. The literal below is only the production default.
  *
  * @module lib/modules/access/tokens
  */
+import { publicConfig } from "@/lib/public-config";
 
 export type PayTokenKind = "erc20" | "native";
 export type PayTokenKey = "PENGU" | "ETH" | "USDC";
@@ -32,8 +37,8 @@ export interface PayTokenDef {
   enabled: boolean;
 }
 
-/** PENGU ERC-20 on Abstract mainnet (verified: 18 decimals). */
-export const PENGU_TOKEN = "0x9eBe3A824Ca958e4b3Da772D2065518F009CBa62".toLowerCase();
+/** PENGU ERC-20 on Abstract mainnet (env-driven; verified: 18 decimals). */
+export const PENGU_TOKEN = publicConfig.penguToken;
 /** USDC.e (bridged) on Abstract mainnet — verified via RPC: 6 decimals. */
 export const USDC_E_TOKEN = "0x84A71ccD554Cc1b02749b35d22F684CC8ec987e1".toLowerCase();
 
@@ -75,6 +80,11 @@ export function payTokenByAddress(address: string): PayTokenDef | null {
 
 /** Convert human amount → base units for a token's decimals. */
 export function toBaseUnits(amount: number, decimals: number): bigint {
+  if (!Number.isFinite(amount) || amount < 0 || amount >= 1e15) {
+    // toFixed() switches to exponential notation above 1e21 and prices are
+    // whole PENGU ≤ 3000 — anything larger is a programming error
+    throw new RangeError(`toBaseUnits: amount out of range (${amount})`);
+  }
   const [int, frac = ""] = amount.toFixed(decimals).split(".");
   const fracPadded = (frac + "0".repeat(decimals)).slice(0, decimals);
   return BigInt(int + fracPadded);

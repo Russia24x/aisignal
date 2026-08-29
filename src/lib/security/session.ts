@@ -41,6 +41,13 @@ export interface EntitlementClaim {
   lifetime: boolean;
   /** payment tx that minted this claim (provenance) */
   txHash: string;
+  /**
+   * epoch ms — block timestamp of the NEWEST payment already consumed by
+   * this claim. REPLAY GUARD: a payment is only accepted when its block
+   * timestamp is strictly greater (or its txHash differs AND is newer),
+   * otherwise re-submitting the same tx would stack the pass forever.
+   */
+  paidAt: number;
   mintedAt: number;
 }
 
@@ -77,6 +84,7 @@ function isValidEntitlement(x: unknown): x is EntitlementClaim {
     typeof e.expiresAt === "number" &&
     typeof e.lifetime === "boolean" &&
     typeof e.txHash === "string" &&
+    typeof e.paidAt === "number" &&
     typeof e.mintedAt === "number"
   );
 }
@@ -183,8 +191,10 @@ export async function getSession(): Promise<SessionPayload | null> {
 /** Same as getSession but also reports the delivery mode (diagnostics). */
 export async function getSessionMode(): Promise<{ session: SessionPayload | null; mode: SessionMode | null }> {
   const jar = await cookies();
-  if (decodeSession(jar.get(COOKIE_NAME)?.value)) {
-    return { session: decodeSession(jar.get(COOKIE_NAME)?.value), mode: "cookie" };
+  const cookieToken = jar.get(COOKIE_NAME)?.value;
+  const fromCookie = decodeSession(cookieToken);
+  if (fromCookie) {
+    return { session: fromCookie, mode: "cookie" };
   }
   const token = await bearerToken();
   const session = decodeSession(token);
@@ -196,5 +206,3 @@ export async function destroySession(): Promise<void> {
   const jar = await cookies();
   jar.delete(COOKIE_NAME);
 }
-
-export const SESSION_COOKIE_NAME = COOKIE_NAME;

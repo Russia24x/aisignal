@@ -1,12 +1,31 @@
 "use client";
 
 /**
- * Live market data hook — polls /api/market/overview.
- * All data comes from the server (server-side caching protects upstreams).
+ * Live market data — SINGLE SHARED POLLER (the same fix AuthProvider applied
+ * to auth state).
+ *
+ * WHY A PROVIDER: `useMarket` used to be a plain hook, and 9 components
+ * instantiated their own copy (Header, Hero ×2, LiveTicker, PriceChart,
+ * SignalSection, ShareButton, MyDashboard, PriceAlerts) — each polling
+ * /api/market/overview every 60s ≈ 9 identical requests per minute per
+ * visitor. Now Providers.tsx mounts <MarketProvider> ONCE: one poll, one
+ * state object, every consumer re-renders together — and the price-pulse
+ * "tick" fires app-wide simultaneously.
+ *
+ * The public API (`useMarket()` → { data, error, loading, refresh, tick })
+ * is unchanged, so call sites need no edits.
  *
  * @module components/pengu/useMarket
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 export interface MarketSnapshot {
   symbol: string;
@@ -52,14 +71,26 @@ export interface MarketData {
   token: { symbol: string; address: string };
 }
 
+export interface MarketApi {
+  data: MarketData | null;
+  error: string | null;
+  loading: boolean;
+  refresh: () => Promise<void>;
+  /** price-move pulse ("up"|"down") — resets after ~900ms; shared app-wide */
+  tick: "up" | "down" | null;
+}
+
 const POLL_MS = 60_000;
 
-export function useMarket() {
+const MarketContext = createContext<MarketApi | null>(null);
+
+export function MarketProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<MarketData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const prevPrice = useRef<number | null>(null);
   const [tick, setTick] = useState<"up" | "down" | null>(null);
+  const tickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -69,7 +100,8 @@ export function useMarket() {
         const next = json as MarketData & { ok: true };
         if (prevPrice.current !== null && next.snapshot.priceUsd !== prevPrice.current) {
           setTick(next.snapshot.priceUsd > prevPrice.current ? "up" : "down");
-          setTimeout(() => setTick(null), 900);
+          if (tickTimer.current) clearTimeout(tickTimer.current);
+          tickTimer.current = setTimeout(() => setTick(null), 900);
         }
         prevPrice.current = next.snapshot.priceUsd;
         setData(next);
@@ -87,10 +119,23 @@ export function useMarket() {
   useEffect(() => {
     load();
     const id = setInterval(load, POLL_MS);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      if (tickTimer.current) clearTimeout(tickTimer.current);
+    };
   }, [load]);
 
-  return { data, error, loading, refresh: load, tick };
+  const api: MarketApi = { data, error, loading, refresh: load, tick };
+  return <MarketContext.Provider value={api}>{children}</MarketContext.Provider>;
+}
+
+/** Read the shared market state (must be used inside <MarketProvider>). */
+export function useMarket(): MarketApi {
+  const ctx = useContext(MarketContext);
+  if (!ctx) {
+    throw new Error("useMarket must be used inside <MarketProvider> (see components/Providers)");
+  }
+  return ctx;
 }
 
 /** Formatting helpers (shared across components). */

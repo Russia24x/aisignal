@@ -52,9 +52,40 @@ export class TTLCache<T> {
       }
       return e.value;
     }
-    const fresh = await loader();
-    this.set(key, fresh);
-    return fresh;
+    // COLD PATH — dedupe concurrent loads (cache stampede guard): the first
+    // caller starts the loader; everyone else awaiting the same key shares
+    // that in-flight promise instead of hammering the upstream API.
+    const existing = this.store.get(key);
+    if (existing?.refreshing) return existing.refreshing;
+    const pending = loader()
+      .then((v) => {
+        this.set(key, v);
+        return v;
+      })
+      .catch((err) => {
+        // failed load: drop the placeholder so the NEXT caller retries
+        // instead of sharing a rejected promise forever
+        const cur = this.store.get(key);
+        if (cur && cur.expiresAt === 0) this.store.delete(key);
+        else if (cur === existing && existing) existing.refreshing = null;
+        throw err;
+      })
+      .finally(() => {
+        if (this.store.get(key) === existing && existing) existing.refreshing = null;
+      });
+    if (existing) {
+      existing.refreshing = pending;
+    } else {
+      // track the in-flight promise on a placeholder entry so concurrent
+      // cold callers find it (expiresAt=0 → never served as a value)
+      this.store.set(key, {
+        value: undefined as T,
+        softExpiresAt: 0,
+        expiresAt: 0,
+        refreshing: pending,
+      });
+    }
+    return pending;
   }
 
   set(key: string, value: T): void {

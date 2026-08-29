@@ -33,6 +33,9 @@ import { getSession } from "@/lib/security/session";
 import { entitlementsFromSession } from "@/lib/modules/access/entitlements";
 import { isLifetimePass, LIFETIME_GRANT_DAYS, DAY_MS, passForAmount } from "@/lib/modules/access/passes";
 import { scanPayments } from "@/lib/modules/access/restore";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("me:dashboard");
 
 // never cache a per-user dashboard response
 export const dynamic = "force-dynamic";
@@ -51,10 +54,12 @@ export async function GET(req: NextRequest) {
   const now = Date.now();
   const active = ent !== null && (ent.lifetime || ent.expiresAt > now);
 
-  const lifetime = active ? isLifetimePass(ent!.product) : false;
-  // the claim's grant span: mintedAt → expiresAt (from the payment block)
+  // sticky lifetime flag (a smaller later payment never downgrades it)
+  const lifetime = active ? ent!.lifetime || isLifetimePass(ent!.product) : false;
+  // the claim's grant span: payment block → expiry (honest after restore
+  // and for stacked passes; falls back to mint time on legacy claims)
   const totalDays = active
-    ? Math.max(1, Math.round((ent!.expiresAt - ent!.mintedAt) / DAY_MS))
+    ? Math.max(1, Math.round((ent!.expiresAt - (ent!.paidAt || ent!.mintedAt)) / DAY_MS))
     : 0;
   const daysLeft = active ? Math.max(0, Math.ceil((ent!.expiresAt - now) / DAY_MS)) : 0;
   const progressPercent = active ? Math.max(0, Math.min(100, (daysLeft / Math.max(1, totalDays)) * 100)) : 0;
@@ -69,6 +74,7 @@ export async function GET(req: NextRequest) {
   }> = [];
   let paymentsCount = 0;
   let totalSpentPengu = 0;
+  let paymentsDegraded = false;
   try {
     const found = await scanPayments(session.addr, 45);
     paymentsCount = found.length;
@@ -85,8 +91,11 @@ export async function GET(req: NextRequest) {
         status: "VERIFIED",
         verifiedAt: new Date(p.blockTimestamp).toISOString(),
       }));
-  } catch {
-    // RPC hiccup — degrade gracefully with an empty list
+  } catch (err) {
+    // RPC hiccup — degrade gracefully, but flag it (L9: distinguishable
+    // from “scan worked, no payments”)
+    log.warn("payment scan failed — dashboard degraded", { err: String(err) });
+    paymentsDegraded = true;
   }
 
   return NextResponse.json(
@@ -97,7 +106,9 @@ export async function GET(req: NextRequest) {
         activeGrant: active
           ? {
               product: ent!.product,
-              startsAt: new Date(ent!.mintedAt).toISOString(),
+              // when the pass actually started (payment block time, not the
+              // session re-mint time — honest after a restore)
+              startsAt: new Date(ent!.paidAt || ent!.mintedAt).toISOString(),
               expiresAt: new Date(ent!.expiresAt).toISOString(),
               daysLeft,
               totalDays: lifetime ? LIFETIME_GRANT_DAYS : totalDays,
@@ -110,6 +121,8 @@ export async function GET(req: NextRequest) {
         paymentsCount,
         daysLeft,
         totalSpentPengu: Math.round(totalSpentPengu * 100) / 100,
+        // true when the on-chain scan failed (empty payments ≠ zero payments)
+        paymentsDegraded,
       },
     },
     {

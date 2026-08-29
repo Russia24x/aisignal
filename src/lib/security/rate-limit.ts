@@ -45,14 +45,27 @@ export function rateLimit(bucket: string, key: string, limit: number, windowMs: 
   return { ok: true, remaining: limit - w.hits.length, retryAfterMs: 0 };
 }
 
-/** Extract client IP from proxy headers (Cloudflare / Caddy aware). */
+/**
+ * Extract client IP from proxy headers.
+ *
+ * Trust order (spoof-resistant):
+ *  1. `cf-connecting-ip` — set by Cloudflare, CANNOT be spoofed in prod
+ *  2. LAST hop of `x-forwarded-for` — proxies APPEND, so a client-supplied
+ *     fake `X-Forwarded-For: 1.2.3.4` survives as the FIRST element only;
+ *     trusting the first element lets anyone bypass rate limits by rotating
+ *     fake header values. The last element is the IP added by the closest
+ *     proxy (our own gateway) — the real client on single-proxy setups.
+ *  3. `x-real-ip` — set by our own reverse proxy when present
+ */
 export function clientIp(req: NextRequest): string {
-  return (
-    req.headers.get("cf-connecting-ip") ||
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    "unknown"
-  );
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf.trim();
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const hops = xff.split(",").map((h) => h.trim()).filter(Boolean);
+    if (hops.length > 0) return hops[hops.length - 1];
+  }
+  return req.headers.get("x-real-ip")?.trim() || "unknown";
 }
 
 /** Standard guard used by API routes. Returns a 429 Response when limited. */

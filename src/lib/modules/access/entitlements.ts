@@ -18,7 +18,7 @@
  */
 import type { EntitlementClaim, SessionPayload } from "@/lib/security/session";
 import type { EntitlementsDTO } from "./passes";
-import { ACCESS_PASSES, isLifetimePass, LIFETIME_GRANT_DAYS, DAY_MS } from "./passes";
+import { ACCESS_PASSES, isLifetimePass, DAY_MS } from "./passes";
 
 export type Entitlements = EntitlementsDTO;
 
@@ -53,7 +53,9 @@ export function entitlementsFromSession(session: SessionPayload | null): Entitle
         ? {
             product: ent.product,
             expiresAt: new Date(ent.expiresAt).toISOString(),
-            lifetime: ent.lifetime || isLifetimePass(ent.product) || daysLeft >= LIFETIME_GRANT_DAYS - 366,
+            // `lifetime` is sticky by construction: verifyPayment and the
+            // restore replay both preserve it across re-mints
+            lifetime: ent.lifetime || isLifetimePass(ent.product),
             txHash: ent.txHash,
           }
         : null,

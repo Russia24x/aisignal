@@ -7,6 +7,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/security/rate-limit";
 import { getPreview } from "@/lib/modules/analysis/signal-service";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("signal:preview");
 
 export async function GET(req: NextRequest) {
   const limited = guard(req, "signal");
@@ -31,7 +34,7 @@ export async function GET(req: NextRequest) {
     if (msg.includes("INSUFFICIENT_HISTORY")) {
       return NextResponse.json({ ok: false, error: "INSUFFICIENT_HISTORY" }, { status: 503 });
     }
-    console.error("[signal:preview] engine error:", msg.slice(0, 500));
+    log.error("engine error", { err: msg.slice(0, 500) });
     return NextResponse.json({ ok: false, error: "ENGINE_ERROR" }, { status: 500 });
   }
 }

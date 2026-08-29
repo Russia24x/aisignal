@@ -88,6 +88,22 @@ export function passForAmount(amountPengu: number): AccessPassDef | null {
   return best;
 }
 
+/**
+ * BigInt twin of passForAmount — exact base-unit comparison for on-chain
+ * amounts (no float threshold drift near pass boundaries).
+ * `amountRaw` is the raw transferred amount with `decimals` decimals.
+ */
+export function passForAmountRaw(amountRaw: bigint, decimals: number): AccessPassDef | null {
+  let best: AccessPassDef | null = null;
+  for (const p of ACCESS_PASSES) {
+    const required = BigInt(p.pricePengu) * 10n ** BigInt(decimals);
+    if (amountRaw >= required) {
+      if (!best || p.pricePengu > best.pricePengu) best = p;
+    }
+  }
+  return best;
+}
+
 /* ------------------------------------------------------------------ */
 /* Client-safe DTO types (mirrored by the server entitlements module)  */
 /* ------------------------------------------------------------------ */

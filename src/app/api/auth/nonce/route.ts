@@ -9,7 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/security/rate-limit";
-import { issueNonce, isValidAddress, buildAuthMessage } from "@/lib/security/siwe";
+import { issueNonce, isValidAddress, buildAuthMessage, MESSAGE_TTL_MS } from "@/lib/security/siwe";
 
 export async function GET(req: NextRequest) {
   const limited = guard(req, "auth");
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
       nonce,
       message,
       issuedAt: issuedAt.toISOString(),
-      expiresInMs: 10 * 60 * 1000,
+      expiresInMs: MESSAGE_TTL_MS,
     },
     {
       headers: {

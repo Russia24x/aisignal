@@ -11,6 +11,9 @@ import { guard } from "@/lib/security/rate-limit";
 import { getSnapshot, getTimeframe } from "@/lib/modules/market/service";
 import { publicConfig } from "@/lib/config";
 import { getSignalHistory } from "@/lib/modules/analysis/signal-service";
+import { createLogger } from "@/lib/logger";
+
+const log = createLogger("market:overview");
 
 export async function GET(req: NextRequest) {
   const limited = guard(req, "public");
@@ -56,9 +59,9 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err) {
-    return NextResponse.json(
-      { ok: false, error: "MARKET_DATA_UNAVAILABLE", detail: String(err).slice(0, 200) },
-      { status: 503 },
-    );
+    // log the real cause server-side; clients only get the code (no
+    // upstream URLs / internals leak through the API)
+    log.error("snapshot failed", { err: String(err) });
+    return NextResponse.json({ ok: false, error: "MARKET_DATA_UNAVAILABLE" }, { status: 503 });
   }
 }
