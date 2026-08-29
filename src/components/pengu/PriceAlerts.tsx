@@ -1,9 +1,11 @@
 "use client";
 
 /**
- * PriceAlerts — authenticated users can create price-crossing alerts for
- * PENGU. The server's market service evaluates them on every snapshot
- * refresh (TTL-bounded) and marks triggered ones.
+ * PriceAlerts — local price-crossing alerts for PENGU (v4: CLIENT-SIDE ONLY).
+ *
+ * The stateless architecture keeps no server-side alert storage: alerts live
+ * in this browser's localStorage and are evaluated client-side against the
+ * polled live price (60s). Works without a wallet connection.
  *
  * UI:
  *  - create form: direction (ABOVE/BELOW) + target price (USD)
@@ -11,19 +13,16 @@
  *  - live alerts list with proximity progress bar (how close the live
  *    price is to each target)
  *  - triggered alerts grouped into a separate collapsible section
- *  - in-page notification: when an alert fires while the page is open
- *    (30s polling), a toast + soft chime announces it
+ *  - in-page notification: when an alert fires while the page is open,
+ *    a toast + soft chime announces it
  *
  * @module components/pengu/PriceAlerts
  */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
-import { Bell, BellOff, BellRing, ChevronDown, History, Loader2, Plus, Trash2, TrendingDown, TrendingUp } from "lucide-react";
+import { Bell, BellOff, BellRing, ChevronDown, History, Plus, Trash2, TrendingDown, TrendingUp } from "lucide-react";
 import { useI18n } from "@/components/i18n/I18nProvider";
-import { useAuth } from "./useAuth";
 import { useMarket, fmt } from "./useMarket";
-import { authFetch } from "@/lib/client-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -41,31 +40,65 @@ interface AlertItem {
   createdAt: string;
 }
 
+const STORAGE_KEY = "pengu_alerts";
+const MAX_ACTIVE = 10;
+
+/* ------------------------------------------------------------------ */
+/* localStorage-backed store via useSyncExternalStore — the canonical   */
+/* React pattern for external stores (SSR-safe + cross-tab sync).      */
+/* ------------------------------------------------------------------ */
+
+function readRaw(): string {
+  try {
+    return localStorage.getItem(STORAGE_KEY) ?? "[]";
+  } catch {
+    return "[]";
+  }
+}
+
+function subscribe(callback: () => void): () => void {
+  window.addEventListener("pengu-alerts-change", callback);
+  window.addEventListener("storage", callback);
+  return () => {
+    window.removeEventListener("pengu-alerts-change", callback);
+    window.removeEventListener("storage", callback);
+  };
+}
+
+function parseAlerts(raw: string): AlertItem[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as AlertItem[]).slice(0, 100) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Write alerts to localStorage and notify all subscribers. */
+function writeAlerts(next: AlertItem[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    window.dispatchEvent(new Event("pengu-alerts-change"));
+  } catch {
+    /* storage full/blocked — alerts simply won't persist */
+  }
+}
+
 export function PriceAlerts() {
   const { t, locale } = useI18n();
-  const { entitlements } = useAuth();
   const { data: market } = useMarket();
-  const qc = useQueryClient();
   const [direction, setDirection] = useState<"ABOVE" | "BELOW">("ABOVE");
   const [targetStr, setTargetStr] = useState("");
   const [formErr, setFormErr] = useState<string | null>(null);
+  const [showTriggered, setShowTriggered] = useState(true);
+  const notifiedRef = useRef<Set<string>>(new Set());
+
+  // external store subscription (localStorage; "[]" on the server snapshot)
+  const raw = useSyncExternalStore(subscribe, readRaw, () => "[]");
+  const alerts = useMemo(() => parseAlerts(raw), [raw]);
 
   const livePrice = market?.snapshot.priceUsd;
 
-  const alertsQuery = useQuery({
-    queryKey: ["alerts"],
-    queryFn: async (): Promise<AlertItem[]> => {
-      const r = await authFetch("/api/alerts", { cache: "no-store" });
-      const d = await r.json();
-      return d.ok ? (d.alerts as AlertItem[]) : [];
-    },
-    enabled: !!entitlements?.authenticated,
-    staleTime: 30_000,
-    refetchInterval: 30_000,
-    retry: 1,
-  });
-
-  const alerts = alertsQuery.data ?? [];
   const activeAlerts = useMemo(() => alerts.filter((a) => a.active), [alerts]);
   const triggeredAlerts = useMemo(
     () =>
@@ -77,66 +110,39 @@ export function PriceAlerts() {
   const activeCount = activeAlerts.length;
   const triggeredCount = triggeredAlerts.length;
 
-  // ── in-page trigger notification ─────────────────────────────────────────
-  // Compare each poll result against the previous snapshot; newly-triggered
-  // alerts (active -> triggered) fire a toast + soft chime.
-  const prevAlertsRef = useRef<Map<string, boolean> | null>(null);
-  const [showTriggered, setShowTriggered] = useState(true);
-  const notifiedRef = useRef<Set<string>>(new Set());
+  // ── client-side trigger evaluation ──────────────────────────────────────
+  // On every live-price update, check ACTIVE alerts; newly crossed ones are
+  // written back through the external store (no setState-in-effect) and
+  // announced with a toast + soft chime.
   useEffect(() => {
-    const map = new Map(alerts.map((a) => [a.id, a.active]));
-    const prev = prevAlertsRef.current;
-    prevAlertsRef.current = map;
-    if (!prev) return; // first load: baseline, no notifications
-    for (const a of alerts) {
-      if (map.get(a.id) === false && prev.get(a.id) === true && !notifiedRef.current.has(a.id)) {
-        notifiedRef.current.add(a.id);
-        const dir = a.direction === "ABOVE" ? "↑" : "↓";
-        toast.success(t("alerts.firedToast", { dir, target: `$${a.target.toFixed(5)}` }), {
-          description: t("alerts.firedToastDesc"),
-          icon: <BellRing className="size-4" />,
-          duration: 8000,
-        });
-        try {
-          playChime();
-        } catch {
-          /* audio autoplay may be blocked — toast alone is fine */
-        }
+    if (!livePrice || livePrice <= 0) return;
+    const crossed = alerts.filter(
+      (a) => a.active && (a.direction === "ABOVE" ? livePrice >= a.target : livePrice <= a.target),
+    );
+    if (crossed.length === 0) return;
+    const nowIso = new Date().toISOString();
+    const next = alerts.map((a) =>
+      crossed.some((c) => c.id === a.id)
+        ? { ...a, active: false, triggeredAt: nowIso, triggeredPrice: livePrice }
+        : a,
+    );
+    writeAlerts(next);
+    for (const a of crossed) {
+      if (notifiedRef.current.has(a.id)) continue;
+      notifiedRef.current.add(a.id);
+      const dir = a.direction === "ABOVE" ? "↑" : "↓";
+      toast.success(t("alerts.firedToast", { dir, target: `$${a.target.toFixed(5)}` }), {
+        description: t("alerts.firedToastDesc"),
+        icon: <BellRing className="size-4" />,
+        duration: 8000,
+      });
+      try {
+        playChime();
+      } catch {
+        /* audio autoplay may be blocked — toast alone is fine */
       }
     }
-  }, [alertsQuery.data, t]);
-
-  const createMut = useMutation({
-    mutationFn: async (input: { direction: "ABOVE" | "BELOW"; target: number }) => {
-      const r = await authFetch("/api/alerts/create", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const d = await r.json();
-      if (!d.ok) throw new Error(d.error ?? "FAILED");
-      return d;
-    },
-    onSuccess: () => {
-      setTargetStr("");
-      setFormErr(null);
-      qc.invalidateQueries({ queryKey: ["alerts"] });
-    },
-    onError: (err: Error) => {
-      const code = err.message;
-      setFormErr(code === "ALERT_LIMIT_REACHED" ? "maxReached" : code === "INVALID_INPUT" ? "invalidInput" : "common.error");
-    },
-  });
-
-  const deleteMut = useMutation({
-    mutationFn: async (id: string) => {
-      const r = await authFetch(`/api/alerts/${id}`, { method: "DELETE" });
-      const d = await r.json();
-      if (!d.ok) throw new Error(d.error ?? "FAILED");
-      return d;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
-  });
+  }, [livePrice, alerts, t]);
 
   const submit = () => {
     setFormErr(null);
@@ -145,8 +151,26 @@ export function PriceAlerts() {
       setFormErr("invalidInput");
       return;
     }
-    createMut.mutate({ direction, target });
+    if (activeCount >= MAX_ACTIVE) {
+      setFormErr("maxReached");
+      return;
+    }
+    writeAlerts([
+      ...alerts,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        direction,
+        target,
+        active: true,
+        triggeredAt: null,
+        triggeredPrice: null,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    setTargetStr("");
   };
+
+  const remove = (id: string) => writeAlerts(alerts.filter((a) => a.id !== id));
 
   const quickSet = (pct: number) => {
     if (!livePrice || livePrice <= 0) return;
@@ -156,29 +180,6 @@ export function PriceAlerts() {
   };
 
   const localeStr = locale === "fa" ? "fa-IR" : "en-US";
-
-  // Not authenticated → show the connect gate
-  if (!entitlements?.authenticated) {
-    return (
-      <section id="alerts" className="scroll-mt-20 px-4 py-16">
-        <div className="mx-auto max-w-3xl">
-          <header className="mb-6">
-            <h2 className="flex items-center gap-2.5 text-2xl font-black sm:text-3xl">
-              <Bell className="size-7 text-primary" />
-              {t("alerts.title")}
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">{t("alerts.subtitle")}</p>
-          </header>
-          <div className="glass-card flex flex-col items-center gap-4 px-6 py-12 text-center">
-            <span className="grid size-14 place-items-center rounded-2xl bg-primary/15 text-primary ring-2 ring-primary/30">
-              <BellOff className="size-7" />
-            </span>
-            <p className="max-w-md text-sm font-bold">{t("alerts.connectFirst")}</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
 
   return (
     <section id="alerts" className="scroll-mt-20 px-4 py-16">
@@ -253,18 +254,9 @@ export function PriceAlerts() {
             </div>
             {/* submit */}
             <div className="flex items-end">
-              <Button
-                onClick={submit}
-                disabled={createMut.isPending || !targetStr}
-                size="lg"
-                className="w-full gap-1.5 font-bold sm:w-auto"
-              >
-                {createMut.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Plus className="size-4" />
-                )}
-                {createMut.isPending ? t("alerts.creating") : t("alerts.create")}
+              <Button onClick={submit} disabled={!targetStr} size="lg" className="w-full gap-1.5 font-bold sm:w-auto">
+                <Plus className="size-4" />
+                {t("alerts.create")}
               </Button>
             </div>
           </div>
@@ -285,12 +277,10 @@ export function PriceAlerts() {
                   type="button"
                   onClick={() => {
                     setDirection(chipDir);
-                    setTimeout(() => {
-                      const p = market?.snapshot.priceUsd;
-                      if (!p || p <= 0) return;
-                      const next = chipDir === "ABOVE" ? p * (1 + chip.pct / 100) : p * (1 - chip.pct / 100);
-                      setTargetStr(next.toFixed(5));
-                    }, 0);
+                    const p = market?.snapshot.priceUsd;
+                    if (!p || p <= 0) return;
+                    const next = chipDir === "ABOVE" ? p * (1 + chip.pct / 100) : p * (1 - chip.pct / 100);
+                    setTargetStr(next.toFixed(5));
                   }}
                   className={cn(
                     "rounded-full border px-2.5 py-0.5 font-mono font-bold transition-colors",
@@ -336,11 +326,7 @@ export function PriceAlerts() {
         </div>
 
         {/* alerts list */}
-        {alertsQuery.isLoading ? (
-          <div className="glass-card p-5 text-center text-sm text-muted-foreground">
-            {t("common.loading")}
-          </div>
-        ) : alerts.length === 0 ? (
+        {alerts.length === 0 ? (
           <div className="empty-grid glass-card relative px-6 py-12 text-center">
             <div className="mx-auto mb-3 grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary ring-2 ring-primary/30">
               <BellOff className="size-5" />
@@ -357,8 +343,7 @@ export function PriceAlerts() {
                     key={a.id}
                     alert={a}
                     livePrice={livePrice}
-                    onDelete={() => deleteMut.mutate(a.id)}
-                    deleting={deleteMut.isPending && deleteMut.variables === a.id}
+                    onDelete={() => remove(a.id)}
                     localeStr={localeStr}
                     t={t}
                   />
@@ -393,8 +378,7 @@ export function PriceAlerts() {
                         key={a.id}
                         alert={a}
                         livePrice={livePrice}
-                        onDelete={() => deleteMut.mutate(a.id)}
-                        deleting={deleteMut.isPending && deleteMut.variables === a.id}
+                        onDelete={() => remove(a.id)}
                         localeStr={localeStr}
                         t={t}
                         compact
@@ -415,7 +399,6 @@ function AlertRow({
   alert,
   livePrice,
   onDelete,
-  deleting,
   localeStr,
   t,
   compact,
@@ -423,7 +406,6 @@ function AlertRow({
   alert: AlertItem;
   livePrice?: number;
   onDelete: () => void;
-  deleting: boolean;
   localeStr: string;
   t: (k: string, params?: Record<string, string | number>) => string;
   compact?: boolean;
@@ -545,14 +527,9 @@ function AlertRow({
               variant="ghost"
               size="icon"
               onClick={onDelete}
-              disabled={deleting}
               className={cn("text-muted-foreground hover:text-destructive", compact ? "size-8" : "size-9")}
             >
-              {deleting ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Trash2 className="size-4" />
-              )}
+              <Trash2 className="size-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="top" className="text-xs">

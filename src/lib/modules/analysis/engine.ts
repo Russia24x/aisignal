@@ -1,20 +1,45 @@
 /**
- * The PenguSignals analysis engine.
+ * The PenguSignals analysis engine v4 — multi-timeframe, stateless.
  *
- * Combines 11 factor families (trend, momentum, volatility, volume,
- * mean-reversion, market structure) into one weighted composite score,
- * derives a BUY / SELL / HOLD decision with confidence, and computes
- * ATR-based risk-management levels (entry zone, stop-loss, take-profits).
+ * Per the target plan (§4, §14):
+ *  - Each timeframe (15m / 1h / 4h / 1d) is scored independently by the
+ *    five factors into a 0–100 score, where 50 = neutral.
+ *  - Primary signal = weighted aggregation (1d & 4h dominant).
+ *  - User-facing states: BUY / SELL / WAIT. Behind the scenes a five-band
+ *    classification is kept for nuance:
+ *        score >= 75 → BUY        55–74 → WATCH (bullish bias)
+ *        45–54      → WAIT        25–44 → WEAK (bearish bias)
+ *        score < 25 → SELL
+ *  - Confidence = strength × agreement × data-quality, penalized when
+ *    volatility is elevated (⚠ per §16).
+ *  - Risk levels (entry / stop / targets) are ATR-based off the 4h series —
+ *    the plan's "trading timeframe".
  *
- * The engine is deterministic given identical market data — same input,
- * same signal — so the stored per-day signal is reproducible & auditable.
+ * The engine is DETERMINISTIC given identical candle data — same input, same
+ * signal — which is what makes database-free history recomputation possible:
+ * any past day can be replayed from public candles and verified by anyone.
  *
  * @module lib/modules/analysis/engine
  */
-import type { Candle, MarketSnapshot } from "../market/types";
-import { computeFactors, type FactorResult, type SRContext } from "./signals";
+import type { Candle, Timeframe } from "../market/types";
+import { computeFactors, type FactorResult } from "./signals";
 
-export type SignalAction = "BUY" | "SELL" | "HOLD";
+export type SignalAction = "BUY" | "SELL" | "WAIT";
+export type SignalBand = "BUY" | "WATCH" | "WAIT" | "WEAK" | "SELL";
+
+/** Score thresholds on the 0–100 scale (plan §4). */
+export const BUY_SCORE_THRESHOLD = 75;
+export const SELL_SCORE_THRESHOLD = 25;
+const WATCH_THRESHOLD = 55;
+const WEAK_THRESHOLD = 45;
+
+/** Primary = weighted blend of timeframes; higher timeframes dominate. */
+export const PRIMARY_TF_WEIGHTS: Record<Timeframe, number> = {
+  "1d": 0.35,
+  "4h": 0.35,
+  "1h": 0.2,
+  "15m": 0.1,
+};
 
 export interface EngineFactor {
   key: string;
@@ -24,12 +49,32 @@ export interface EngineFactor {
   contribution: number; // weight * score (signed)
 }
 
+export interface TimeframeResult {
+  timeframe: Timeframe;
+  /** 0–100 (50 = neutral) */
+  score: number;
+  action: SignalAction;
+  band: SignalBand;
+  /** single-window confidence 0–100 (magnitude + factor agreement) */
+  confidence: number;
+  factors: EngineFactor[];
+  atr: number | null;
+  /** ATR as percent of price (human-readable volatility) */
+  atrPct: number | null;
+  dataQuality: number;
+  candlesUsed: number;
+}
+
 export interface EngineOutput {
   action: SignalAction;
-  score: number; // -100..100
-  confidence: number; // 0..100
-  dataQuality: number; // 0..1
+  band: SignalBand;
+  /** 0–100 primary score */
+  score: number;
+  confidence: number;
+  dataQuality: number;
   price: number;
+  timeframes: Record<Timeframe, TimeframeResult>;
+  /** risk-management levels (ATR-based, from the 4h series) */
   entryLow: number | null;
   entryHigh: number | null;
   stopLoss: number | null;
@@ -38,19 +83,17 @@ export interface EngineOutput {
   riskReward: number | null;
   expectedRangeLow: number | null;
   expectedRangeHigh: number | null;
-  factors: EngineFactor[];
-  atr: number | null;
-  volatility: number | null; // 20d stddev of daily returns
-  support: number | null;
-  resistance: number | null;
+  /** daily-return stddev (20) */
+  volatility: number | null;
+  /** true when ATR is elevated vs its own average → confidence penalty */
+  volatilityWarning: boolean;
   reasoning: { fa: string; en: string };
   generatedAt: number;
-  candlesUsed: number;
 }
 
-/** Decision thresholds (composite units). */
-const BUY_THRESHOLD = 20;
-const SELL_THRESHOLD = -20;
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
 
 function fmt(n: number | null | undefined, digits = 5): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
@@ -62,159 +105,85 @@ function fmtPct(n: number | null | undefined, digits = 1): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(digits)}%`;
 }
 
-/** Build human-readable, fully data-grounded reasoning in fa & en. */
-function buildReasoning(
-  action: SignalAction,
-  score: number,
-  confidence: number,
-  factors: EngineFactor[],
-  sr: SRContext,
-  out: Pick<
-    EngineOutput,
-    | "price"
-    | "stopLoss"
-    | "takeProfit1"
-    | "takeProfit2"
-    | "entryLow"
-    | "entryHigh"
-    | "expectedRangeLow"
-    | "expectedRangeHigh"
-  >,
-  snapshot: MarketSnapshot,
-): { fa: string; en: string } {
-  // top 3 contributing factors by |contribution|
-  const top = [...factors].sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution)).slice(0, 3);
-  const f = (x: FactorResult) => x.values;
-
-  const describeFactor = (k: string, v: Record<string, number | string | null>): { fa: string; en: string } => {
-    switch (k) {
-      case "emaTrend":
-        return {
-          fa: `روند EMA: EMA9 در ${fmt(v.ema9 as number)} و EMA21 در ${fmt(v.ema21 as number)}`,
-          en: `EMA trend: EMA9 at ${fmt(v.ema9 as number)} vs EMA21 at ${fmt(v.ema21 as number)}`,
-        };
-      case "smaStructure":
-        return {
-          fa: `ساختار SMA: SMA20=${fmt(v.sma20 as number)} ، SMA50=${fmt(v.sma50 as number)}`,
-          en: `SMA structure: SMA20=${fmt(v.sma20 as number)}, SMA50=${fmt(v.sma50 as number)}`,
-        };
-      case "rsi":
-        return {
-          fa: `RSI(14) = ${fmt(v.rsi as number, 1)}`,
-          en: `RSI(14) = ${fmt(v.rsi as number, 1)}`,
-        };
-      case "macd":
-        return {
-          fa: `هیستوگرام MACD = ${fmt(v.hist as number, 6)}`,
-          en: `MACD histogram = ${fmt(v.hist as number, 6)}`,
-        };
-      case "bollinger":
-        return {
-          fa: `موقعیت %B بولینگر = ${fmt(v.percentB as number, 2)}`,
-          en: `Bollinger %B = ${fmt(v.percentB as number, 2)}`,
-        };
-      case "stochastic":
-        return {
-          fa: `استوکاستیک %K=${fmt(v.k as number, 1)} ، %D=${fmt(v.d as number, 1)}`,
-          en: `Stochastic %K=${fmt(v.k as number, 1)}, %D=${fmt(v.d as number, 1)}`,
-        };
-      case "obv":
-        return {
-          fa: `شیب OBV نسبت به روند قیمت ${Number(v.obvSlope as number) >= 0 ? "مثبت" : "منفی"}`,
-          en: `OBV slope is ${Number(v.obvSlope as number) >= 0 ? "positive" : "negative"} vs price trend`,
-        };
-      case "vwap":
-        return {
-          fa: `قیمت ${Number(v.price) > Number(v.vwap) ? "بالاتر از" : "پایین‌تر از"} VWAP(${fmt(v.vwap as number)})`,
-          en: `Price is ${Number(v.price) > Number(v.vwap) ? "above" : "below"} VWAP(${fmt(v.vwap as number)})`,
-        };
-      case "momentum":
-        return {
-          fa: `مومنتوم ۱۰روزه = ${fmtPct(v.roc10 as number)}`,
-          en: `10-day momentum = ${fmtPct(v.roc10 as number)}`,
-        };
-      case "volume":
-        return {
-          fa: `حجم معاملات نسبت به میانگین ${v.volumeAvg ? "بالا" : "پایین"}`,
-          en: `Volume ${v.volumeAvg ? "elevated" : "subdued"} vs 20d average`,
-        };
-      case "srLevels":
-        return {
-          fa: `حمایت ${fmt(v.nearestSupport as number)} / مقاومت ${fmt(v.nearestResistance as number)}`,
-          en: `Support ${fmt(v.nearestSupport as number)} / Resistance ${fmt(v.nearestResistance as number)}`,
-        };
-      default:
-        return { fa: k, en: k };
-    }
-  };
-
-  const topFa = top.map((t) => describeFactor(t.key, t.values).fa).join(" • ");
-  const topEn = top.map((t) => describeFactor(t.key, t.values).en).join(" • ");
-
-  const conf = Math.round(confidence);
-  if (action === "BUY") {
-    return {
-      fa: `امتیاز مرکب ${fmt(score, 0)} از ۱۰۰- → سیگنال خرید با اطمینان ${conf}٪. قیمت فعلی $${fmt(snapshot.priceUsd)} (تغییر ۲۴س $${fmtPct(snapshot.change24h)}). نواحی کلیدی: ورود ${fmt(out.entryLow)}–${fmt(out.entryHigh)}، حد ضرر ${fmt(out.stopLoss)}، هدف اول ${fmt(out.takeProfit1)} و هدف دوم ${fmt(out.takeProfit2)}. عوامل اصلی: ${topFa}. این سیگنال صرفاً تحلیل الگوریتمی است، نه توصیه مالی.`,
-      en: `Composite score ${fmt(score, 0)}/±100 → BUY with ${conf}% confidence. Current price $${fmt(snapshot.priceUsd)} (24h ${fmtPct(snapshot.change24h)}). Key levels: entry ${fmt(out.entryLow)}–${fmt(out.entryHigh)}, stop-loss ${fmt(out.stopLoss)}, TP1 ${fmt(out.takeProfit1)}, TP2 ${fmt(out.takeProfit2)}. Top factors: ${topEn}. Algorithmic analysis only — not financial advice.`,
-    };
-  }
-  if (action === "SELL") {
-    return {
-      fa: `امتیاز مرکب ${fmt(score, 0)} از ۱۰۰- → سیگنال فروش با اطمینان ${conf}٪. قیمت فعلی $${fmt(snapshot.priceUsd)} (تغییر ۲۴س $${fmtPct(snapshot.change24h)}%). عوامل اصلی: ${topFa}. در صورت حفظ دارایی، حد ضرر پیشنهادی بالای ${fmt(out.stopLoss)} و ناحیه بازخرید ${fmt(out.takeProfit1)}–${fmt(out.takeProfit2)} است. این سیگنال صرفاً تحلیل الگوریتمی است، نه توصیه مالی.`,
-      en: `Composite score ${fmt(score, 0)}/±100 → SELL with ${conf}% confidence. Current price $${fmt(snapshot.priceUsd)} (24h ${fmtPct(snapshot.change24h)}%). Top factors: ${topEn}. If holding, suggested stop above ${fmt(out.stopLoss)} with buy-back zone ${fmt(out.takeProfit1)}–${fmt(out.takeProfit2)}. Algorithmic analysis only — not financial advice.`,
-    };
-  }
-  return {
-    fa: `امتیاز مرکب ${fmt(score, 0)} از ۱۰۰- → بازار بی‌طرف (نگهداری/انتظار) با اطمینان ${conf}٪. قیمت فعلی $${fmt(snapshot.priceUsd)} در محدوده انتظاری ${fmt(out.expectedRangeLow ?? null)} تا ${fmt(out.expectedRangeHigh ?? null)}. عوامل اصلی: ${topFa}. صبر تا شکست حمایت ${fmt(sr.nearestSupport)} یا مقاومت ${fmt(sr.nearestResistance)} منطقی‌تر است. این سیگنال صرفاً تحلیل الگوریتمی است، نه توصیه مالی.`,
-    en: `Composite score ${fmt(score, 0)}/±100 → neutral market (HOLD/wait) at ${conf}% confidence. Current price $${fmt(snapshot.priceUsd)} inside expected range ${fmt(out.expectedRangeLow ?? null)}–${fmt(out.expectedRangeHigh ?? null)}. Top factors: ${topEn}. Waiting for a break of support ${fmt(sr.nearestSupport)} or resistance ${fmt(sr.nearestResistance)} is prudent. Algorithmic analysis only — not financial advice.`,
-  };
+export function bandForScore(score: number): SignalBand {
+  if (score >= BUY_SCORE_THRESHOLD) return "BUY";
+  if (score >= WATCH_THRESHOLD) return "WATCH";
+  if (score >= WEAK_THRESHOLD) return "WAIT";
+  if (score >= SELL_SCORE_THRESHOLD) return "WEAK";
+  return "SELL";
 }
 
-export interface EngineInput {
-  candles: Candle[]; // daily, ascending
-  snapshot: MarketSnapshot;
-  dataQuality: number;
+export function actionForScore(score: number): SignalAction {
+  if (score >= BUY_SCORE_THRESHOLD) return "BUY";
+  if (score < SELL_SCORE_THRESHOLD) return "SELL";
+  return "WAIT";
 }
 
-/** Run the engine over daily candles + live snapshot. */
-export function runEngine(input: EngineInput): EngineOutput {
-  const { candles, snapshot, dataQuality } = input;
-  const { factors, sr, atr, volatility } = computeFactors({
-    candles,
-    snapshot: {
-      priceUsd: snapshot.priceUsd,
-      volume24hUsd: snapshot.volume24hUsd,
-      liquidityUsd: snapshot.liquidityUsd,
-      change24h: snapshot.change24h,
-    },
-  });
+/** 0–100 score from a raw weighted factor composite in [-1, 1]. */
+export function scoreFromFactors(factors: FactorResult[]): number {
+  const totalWeight = factors.reduce((a, f) => a + f.weight, 0) || 1;
+  const raw = factors.reduce((a, f) => a + f.weight * f.score, 0) / totalWeight;
+  return Math.round((50 + raw * 50) * 10) / 10;
+}
 
-  const totalWeight = factors.reduce((a, f) => a + f.weight, 0);
-  const rawScore = factors.reduce((a, f) => a + f.weight * f.score, 0) / totalWeight; // -1..1
-  const score = Math.round(rawScore * 100 * 10) / 10; // -100..100
+/** raw composite in [-1,1] from a 0–100 score. */
+function rawFromScore(score: number): number {
+  return (score - 50) / 50;
+}
 
-  const action: SignalAction = score >= BUY_THRESHOLD ? "BUY" : score <= SELL_THRESHOLD ? "SELL" : "HOLD";
-
-  // confidence: magnitude + agreement across factors
-  const direction = Math.sign(score) || 0;
+/** Single-window confidence: magnitude + factor agreement. */
+function windowConfidence(score: number, factors: FactorResult[], dataQuality: number): number {
+  const raw = rawFromScore(score);
+  const direction = Math.sign(raw) || 0;
   const agreeing = factors.filter((f) => Math.sign(f.score) === direction && direction !== 0);
   const agreementRatio = factors.length > 0 ? agreeing.length / factors.length : 0;
-  const magnitudeConf = Math.min(70, Math.abs(score) * 0.85);
+  const magnitudeConf = Math.min(70, Math.abs(raw) * 100 * 0.85);
   const agreementConf = agreementRatio * 30;
   let confidence = Math.round((magnitudeConf + agreementConf) * dataQuality);
-  confidence = Math.max(5, Math.min(95, confidence));
+  return Math.max(5, Math.min(95, confidence));
+}
 
-  const price = snapshot.priceUsd;
-  const atrNow = atr !== null && atr > 0 ? atr : price * 0.05; // fallback 5% daily range
+/**
+ * Run the five-factor analysis on ONE candle window (any timeframe).
+ * Pure & deterministic — also used to replay history.
+ */
+export function runTimeframe(
+  candles: Candle[],
+  timeframe: Timeframe,
+  dataQuality: number,
+): TimeframeResult {
+  const { factors, atr } = computeFactors(candles);
+  const score = scoreFromFactors(factors);
+  const price = candles[candles.length - 1]?.c ?? 0;
+  return {
+    timeframe,
+    score,
+    action: actionForScore(score),
+    band: bandForScore(score),
+    confidence: windowConfidence(score, factors, dataQuality),
+    factors: factors.map((f) => ({
+      key: f.key,
+      score: Math.round(f.score * 1000) / 1000,
+      weight: f.weight,
+      values: f.values,
+      contribution: Math.round(f.weight * f.score * 100) / 100,
+    })),
+    atr,
+    atrPct: atr !== null && price > 0 ? Math.round((atr / price) * 10000) / 100 : null,
+    dataQuality,
+    candlesUsed: candles.length,
+  };
+}
 
-  // Risk management (ATR-based)
+/** ATR-based risk levels for an action at `price`. */
+export function riskLevels(price: number, atrValue: number | null, action: SignalAction) {
+  const atrNow = atrValue !== null && atrValue > 0 ? atrValue : price * 0.05;
   let entryLow: number | null = null;
   let entryHigh: number | null = null;
   let stopLoss: number | null = null;
   let takeProfit1: number | null = null;
   let takeProfit2: number | null = null;
   let riskReward: number | null = null;
-
   if (action === "BUY") {
     entryLow = price * 0.99;
     entryHigh = price * 1.005;
@@ -235,44 +204,190 @@ export function runEngine(input: EngineInput): EngineOutput {
     const reward = price - takeProfit1;
     riskReward = risk > 0 ? Math.round((reward / risk) * 100) / 100 : null;
   }
-  const expectedRangeLow = price - atrNow;
-  const expectedRangeHigh = price + atrNow;
-
-  const engineFactors: EngineFactor[] = factors.map((f) => ({
-    key: f.key,
-    score: Math.round(f.score * 1000) / 1000,
-    weight: f.weight,
-    values: f.values,
-    contribution: Math.round(f.weight * f.score * 100) / 100,
-  }));
-
-  const partial = {
-    price,
+  return {
     entryLow,
     entryHigh,
     stopLoss,
     takeProfit1,
     takeProfit2,
-    expectedRangeLow,
-    expectedRangeHigh,
+    riskReward,
+    expectedRangeLow: price - atrNow,
+    expectedRangeHigh: price + atrNow,
   };
+}
 
-  const reasoning = buildReasoning(action, score, confidence, engineFactors, sr, partial, snapshot);
+/* ------------------------------------------------------------------ */
+/* Reasoning (plan §15–§16 — human language, never a promise)           */
+/* ------------------------------------------------------------------ */
 
+function describeFactor(k: string, v: Record<string, number | string | null>): { fa: string; en: string } {
+  switch (k) {
+    case "trend":
+      return {
+        fa: `روند: EMA20 در ${fmt(v.ema20 as number)} ${Number(v.ema20) >= Number(v.ema50) ? "بالاتر از" : "پایین‌تر از"} EMA50 (${fmt(v.ema50 as number)}) و قیمت ${Number(v.price) > Number(v.ema20) ? "بالاتر از" : "پایین‌تر از"} EMA20`,
+        en: `Trend: EMA20 at ${fmt(v.ema20 as number)} ${Number(v.ema20) >= Number(v.ema50) ? "above" : "below"} EMA50 (${fmt(v.ema50 as number)}); price ${Number(v.price) > Number(v.ema20) ? "above" : "below"} EMA20`,
+      };
+    case "momentum":
+      return {
+        fa: `مومنتوم ۱۰کندلی ${fmtPct(v.roc10 as number)} با شیب ${Number(v.slope20) >= 0 ? "صعودی" : "نزولی"}`,
+        en: `10-candle momentum ${fmtPct(v.roc10 as number)} with ${Number(v.slope20) >= 0 ? "rising" : "falling"} slope`,
+      };
+    case "macd":
+      return {
+        fa: `هیستوگرام MACD ${Number(v.hist) >= 0 ? "مثبت" : "منفی"} (${fmt(v.hist as number, 6)})`,
+        en: `MACD histogram ${Number(v.hist) >= 0 ? "positive" : "negative"} (${fmt(v.hist as number, 6)})`,
+      };
+    case "rsi":
+      return {
+        fa: `RSI(14) = ${fmt(v.rsi as number, 1)}`,
+        en: `RSI(14) = ${fmt(v.rsi as number, 1)}`,
+      };
+    case "volume":
+      return {
+        fa: `حجم معاملات نسبت به میانگین ۲۰کندلی ${Number(v.volumeNow) >= Number(v.volumeAvg) ? "بالاتر" : "پایین‌تر"}`,
+        en: `Volume ${Number(v.volumeNow) >= Number(v.volumeAvg) ? "above" : "below"} the 20-candle average`,
+      };
+    default:
+      return { fa: k, en: k };
+  }
+}
+
+function buildReasoning(out: EngineOutput): { fa: string; en: string } {
+  const t4h = out.timeframes["4h"];
+  // top 3 contributing factors on the dominant trading timeframe
+  const top = [...t4h.factors]
+    .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution))
+    .slice(0, 3);
+  const topFa = top.map((t) => describeFactor(t.key, t.values).fa).join(" • ");
+  const topEn = top.map((t) => describeFactor(t.key, t.values).en).join(" • ");
+
+  const conf = Math.round(out.confidence);
+  const volWarnFa = out.volatilityWarning
+    ? " توجه: نوسانات بالاتر از حد معمول است و ریسک معامله بیشتر شده."
+    : "";
+  const volWarnEn = out.volatilityWarning
+    ? " Note: volatility is elevated — trade risk is higher than usual."
+    : "";
+
+  if (out.action === "BUY") {
+    return {
+      fa: `گرایش خرید — امتیاز ${fmt(out.score, 0)} از ۱۰۰ با اطمینان ${conf}٪. مومنتوم و روند در تایم‌فریم‌های اصلی هم‌جهت صعودی هستند؛ شرایط ورود در حال بهبود است. عوامل اصلی: ${topFa}. نواحی کلیدی: ورود ${fmt(out.entryLow)}–${fmt(out.entryHigh)}، حد ضرر ${fmt(out.stopLoss)}، هدف اول ${fmt(out.takeProfit1)} و هدف دوم ${fmt(out.takeProfit2)}.${volWarnFa} این تحلیل الگوریتمی است، نه توصیه مالی.`,
+      en: `BUY BIAS — score ${fmt(out.score, 0)}/100 at ${conf}% confidence. Momentum and trend are aligned bullishly on the primary timeframes; entry conditions are improving. Top factors: ${topEn}. Key levels: entry ${fmt(out.entryLow)}–${fmt(out.entryHigh)}, stop-loss ${fmt(out.stopLoss)}, TP1 ${fmt(out.takeProfit1)}, TP2 ${fmt(out.takeProfit2)}.${volWarnEn} Algorithmic analysis only — not financial advice.`,
+    };
+  }
+  if (out.action === "SELL") {
+    return {
+      fa: `گرایش فروش — امتیاز ${fmt(out.score, 0)} از ۱۰۰ با اطمینان ${conf}٪. مومنتوم و روند هم‌جهت نزولی هستند. عوامل اصلی: ${topFa}. در صورت حفظ دارایی، حد ضرر پیشنهادی بالای ${fmt(out.stopLoss)} و ناحیه بازخرید ${fmt(out.takeProfit1)}–${fmt(out.takeProfit2)} است.${volWarnFa} این تحلیل الگوریتمی است، نه توصیه مالی.`,
+      en: `SELL BIAS — score ${fmt(out.score, 0)}/100 at ${conf}% confidence. Momentum and trend are aligned bearishly. Top factors: ${topEn}. If holding, suggested stop above ${fmt(out.stopLoss)} with buy-back zone ${fmt(out.takeProfit1)}–${fmt(out.takeProfit2)}.${volWarnEn} Algorithmic analysis only — not financial advice.`,
+    };
+  }
   return {
+    fa: `انتظار — امتیاز ${fmt(out.score, 0)} از ۱۰۰ با اطمینان ${conf}٪. بازار جهت مشخصی ندارد (امتیاز نزدیک ۵۰) و ورود زودهنگام ریسک دارد. عوامل اصلی: ${topFa}. محدوده انتظاری قیمت ${fmt(out.expectedRangeLow)} تا ${fmt(out.expectedRangeHigh)} است؛ منطقی‌تر است تا شکل‌گیری جهت روشن‌تر صبر کنیم.${volWarnFa} این تحلیل الگوریتمی است، نه توصیه مالی.`,
+    en: `WAIT — score ${fmt(out.score, 0)}/100 at ${conf}% confidence. The market has no clear direction (score near 50); early entries carry risk. Top factors: ${topEn}. Expected price range ${fmt(out.expectedRangeLow)}–${fmt(out.expectedRangeHigh)}; waiting for clearer direction is prudent.${volWarnEn} Algorithmic analysis only — not financial advice.`,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Multi-timeframe engine                                              */
+/* ------------------------------------------------------------------ */
+
+export interface EngineInput {
+  /** candle windows per timeframe (ascending, warm-up included) */
+  timeframes: Record<Timeframe, Candle[]>;
+  /** live price (fresh ticker); falls back to the latest 15m close */
+  price: number;
+  /** data quality per timeframe (0..1) */
+  dataQuality?: Partial<Record<Timeframe, number>>;
+}
+
+/** Run the full multi-timeframe engine. Deterministic on candle data. */
+export function runEngine(input: EngineInput): EngineOutput {
+  const tfResults = {} as Record<Timeframe, TimeframeResult>;
+  for (const tf of ["15m", "1h", "4h", "1d"] as Timeframe[]) {
+    const candles = input.timeframes[tf] ?? [];
+    const dq =
+      input.dataQuality?.[tf] ??
+      (candles.length >= 60 ? 1 : Math.max(0.4, candles.length / 60));
+    tfResults[tf] = runTimeframe(candles, tf, dq);
+  }
+
+  // primary score = weighted blend of TF scores
+  let weighted = 0;
+  let wsum = 0;
+  for (const tf of ["15m", "1h", "4h", "1d"] as Timeframe[]) {
+    weighted += PRIMARY_TF_WEIGHTS[tf] * rawFromScore(tfResults[tf].score);
+    wsum += PRIMARY_TF_WEIGHTS[tf];
+  }
+  const primaryRaw = weighted / wsum;
+  const score = Math.round((50 + primaryRaw * 50) * 10) / 10;
+  const action = actionForScore(score);
+  const band = bandForScore(score);
+
+  // timeframe agreement (share of TFs whose ACTION matches the primary action)
+  const tfActions = (["15m", "1h", "4h", "1d"] as Timeframe[]).map((tf) => tfResults[tf].action);
+  const agreementRatio =
+    action === "WAIT"
+      ? tfActions.filter((a) => a === "WAIT").length / 4
+      : tfActions.filter((a) => a === action).length / 4;
+
+  // factor agreement on the two dominant timeframes
+  const dominantFactors = [...tfResults["4h"].factors, ...tfResults["1d"].factors];
+  const direction = Math.sign(primaryRaw) || 0;
+  const factorAgree =
+    direction !== 0
+      ? dominantFactors.filter((f) => Math.sign(f.score) === direction).length /
+        dominantFactors.length
+      : 0.5;
+
+  // data quality = worst across TFs
+  const dataQuality = Math.min(
+    ...(["15m", "1h", "4h", "1d"] as Timeframe[]).map((tf) => tfResults[tf].dataQuality),
+  );
+
+  // volatility: daily ATR elevated vs its own 20-candle average? (⚠ §16)
+  const t4h = tfResults["4h"];
+  const t1d = tfResults["1d"];
+  const atrPctNow = t1d.atrPct ?? t4h.atrPct;
+  // heuristic: elevated when 1d ATR% ≥ 6% (PENGU's calm regime is ~3–4%)
+  const volatilityWarning = atrPctNow !== null && atrPctNow >= 6;
+
+  let confidence =
+    Math.min(70, Math.abs(primaryRaw) * 100 * 0.85) +
+    agreementRatio * 15 +
+    factorAgree * 15;
+  confidence = Math.round(confidence * dataQuality);
+  if (volatilityWarning) confidence = Math.round(confidence * 0.85);
+  confidence = Math.max(5, Math.min(95, confidence));
+
+  const price = input.price > 0 ? input.price : (input.timeframes["15m"]?.slice(-1)[0]?.c ?? 0);
+  const levels = riskLevels(price, t4h.atr, action);
+
+  const out: EngineOutput = {
     action,
+    band,
     score,
     confidence,
     dataQuality,
-    ...partial,
-    riskReward,
-    factors: engineFactors,
-    atr: atrNow,
-    volatility,
-    support: sr.nearestSupport,
-    resistance: sr.nearestResistance,
-    reasoning,
+    price,
+    timeframes: tfResults,
+    ...levels,
+    volatility: null,
+    volatilityWarning,
+    reasoning: { fa: "", en: "" },
     generatedAt: Date.now(),
-    candlesUsed: candles.length,
   };
+  // daily-return stddev as volatility context
+  const dailyCloses = input.timeframes["1d"]?.map((c) => c.c) ?? [];
+  if (dailyCloses.length >= 21) {
+    const rets: number[] = [];
+    for (let i = dailyCloses.length - 20; i < dailyCloses.length; i++) {
+      rets.push((dailyCloses[i] - dailyCloses[i - 1]) / dailyCloses[i - 1]);
+    }
+    const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+    out.volatility = Math.sqrt(
+      rets.reduce((a, r) => a + (r - mean) ** 2, 0) / rets.length,
+    );
+  }
+  out.reasoning = buildReasoning(out);
+  return out;
 }

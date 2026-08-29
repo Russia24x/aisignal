@@ -10,18 +10,19 @@ import { useI18n } from "@/components/i18n/I18nProvider";
 import { Badge } from "@/components/ui/badge";
 import { Brain, Database, ShieldCheck } from "lucide-react";
 
+/** The five factor families (target plan §3) — weights sum to 100. */
 const INDICATORS = [
-  { icon: "📈", fa: "روند EMA (9/21)", en: "EMA trend (9/21)", weight: 14 },
-  { icon: "🧱", fa: "ساختار SMA (20/50)", en: "SMA structure (20/50)", weight: 10 },
-  { icon: "⚡", fa: "RSI (14) وایلدر", en: "RSI (14) Wilder", weight: 14 },
-  { icon: "🌊", fa: "MACD (12/26/9)", en: "MACD (12/26/9)", weight: 14 },
-  { icon: "📊", fa: "باندهای بولینگر (20, 2σ)", en: "Bollinger Bands (20, 2σ)", weight: 10 },
-  { icon: "🔄", fa: "استوکاستیک (14/3)", en: "Stochastic (14/3)", weight: 9 },
-  { icon: "💧", fa: "جریان حجم OBV + واگرایی", en: "OBV flow + divergence", weight: 8 },
-  { icon: "⚖️", fa: "VWAP غلتان (20)", en: "Rolling VWAP (20)", weight: 7 },
-  { icon: "🚀", fa: "مومنتوم ROC + رگرسیون خطی", en: "ROC momentum + lin-reg", weight: 7 },
-  { icon: "🔊", fa: "رژیم حجم معاملات", en: "Volume regime", weight: 7 },
-  { icon: "🧭", fa: "سطوح حمایت/مقاومت", en: "Support/Resistance", weight: 8 },
+  { icon: "📈", fa: "روند EMA (20/50)", en: "EMA trend (20/50)", weight: 30 },
+  { icon: "🚀", fa: "مومنتوم (ROC + شیب، نرمال‌شده با ATR)", en: "Momentum (ROC + slope, ATR-norm)", weight: 25 },
+  { icon: "🌊", fa: "MACD (12/26/9)", en: "MACD (12/26/9)", weight: 20 },
+  { icon: "⚡", fa: "RSI (14) وایلدر", en: "RSI (14) Wilder", weight: 15 },
+  { icon: "🔊", fa: "رژیم حجم معاملات", en: "Volume regime", weight: 10 },
+] as const;
+
+/** ATR powers risk levels + the volatility warning — not a scored factor. */
+const CONTEXT = [
+  { icon: "📏", fa: "ATR (14) — سطوح ریسک و هشدار نوسان", en: "ATR (14) — risk levels & volatility warning" },
+  { icon: "🕐", fa: "چهار تایم‌فریم: 15m / 1h / 4h / 1d", en: "Four timeframes: 15m / 1h / 4h / 1d" },
 ] as const;
 
 export function EngineSection() {
@@ -51,12 +52,24 @@ export function EngineSection() {
               <div className="flex-1">
                 <div className="text-sm font-bold">{locale === "fa" ? ind.fa : ind.en}</div>
                 <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" dir="ltr">
-                  <div className="h-full rounded-full bg-primary/70" style={{ width: `${(ind.weight / 14) * 100}%` }} />
+                  <div className="h-full rounded-full bg-primary/70" style={{ width: `${(ind.weight / 30) * 100}%` }} />
                 </div>
               </div>
               <Badge variant="outline" className="font-mono text-[10px] font-black">
                 w{ind.weight}
               </Badge>
+            </div>
+          ))}
+        </div>
+
+        {/* context row — what else the engine watches */}
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {CONTEXT.map((c) => (
+            <div key={c.en} className="glass-card flex items-center gap-3 px-4 py-3 opacity-80">
+              <span className="text-lg">{c.icon}</span>
+              <span className="text-xs font-semibold text-muted-foreground">
+                {locale === "fa" ? c.fa : c.en}
+              </span>
             </div>
           ))}
         </div>

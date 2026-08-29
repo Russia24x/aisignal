@@ -68,9 +68,9 @@ export async function fetchSnapshot(): Promise<MarketSnapshot> {
   const snapshot: MarketSnapshot = {
     symbol: p.baseToken.symbol,
     priceUsd: Number(p.priceUsd),
-    change5m: p.priceChange?.m5 ?? 0,
-    change1h: p.priceChange?.h1 ?? 0,
-    change6h: p.priceChange?.h6 ?? 0,
+    change5m: p.priceChange?.m5 ?? null,
+    change1h: p.priceChange?.h1 ?? null,
+    change6h: p.priceChange?.h6 ?? null,
     change24h: p.priceChange?.h24 ?? 0,
     volume24hUsd: p.volume?.h24 ?? 0,
     liquidityUsd: p.liquidity?.usd ?? 0,

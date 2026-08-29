@@ -1,16 +1,17 @@
 "use client";
 
 /**
- * SignalSection — the product.
+ * SignalSection — the product (v4 multi-timeframe).
  *
  * State machine (server-driven via /api/auth/session entitlements):
  *   not connected / not authenticated → connect CTA
  *   no active pass                    → locked preview + pass CTA
  *   active pass (any PASS_* tier)      → full signal card
  *
- * The free layer always shows the live consensus teaser so visitors can
- * verify the engine is real before paying. Entry and browsing are free
- * (v2 access model) — only signal CONTENT requires an access pass.
+ * Layout follows the target plan §14: one primary BUY/SELL/WAIT verdict with
+ * a 0–100 score, confidence, plus per-timeframe dots (15m / 1h / 4h / 1d).
+ * The free layer always shows the live consensus teaser (factor counts +
+ * timeframe dots) so visitors can verify the engine is real before paying.
  *
  * @module components/pengu/SignalSection
  */
@@ -23,7 +24,6 @@ import { authFetch } from "@/lib/client-session";
 import { PaymentDialog, type PaymentProduct } from "./PaymentDialog";
 import { FactorList } from "./FactorList";
 import { MoodGauge } from "./MoodGauge";
-import { NextSignalCountdown } from "./NextSignalCountdown";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -43,17 +43,34 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
+  TriangleAlert,
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { passById } from "@/lib/modules/access/passes";
+import { passById, perDayPrice } from "@/lib/modules/access/passes";
+
+type TfKey = "15m" | "1h" | "4h" | "1d";
+type SignalAction = "BUY" | "SELL" | "WAIT";
+
+interface TfResult {
+  timeframe: TfKey;
+  score: number;
+  action: SignalAction;
+  band: string;
+  confidence: number;
+  atr: number | null;
+  atrPct: number | null;
+  candlesUsed: number;
+}
 
 interface FullSignal {
-  action: "BUY" | "SELL" | "HOLD";
+  action: SignalAction;
+  band: string;
   score: number;
   confidence: number;
   dataQuality: number;
   price: number;
+  timeframes: Record<TfKey, TfResult>;
   entryLow: number | null;
   entryHigh: number | null;
   stopLoss: number | null;
@@ -62,9 +79,7 @@ interface FullSignal {
   riskReward: number | null;
   expectedRangeLow: number | null;
   expectedRangeHigh: number | null;
-  support: number | null;
-  resistance: number | null;
-  atr: number | null;
+  volatilityWarning: boolean;
   volatility: number | null;
   factors: { key: string; score: number; weight: number; contribution: number }[];
   reasoning: { fa: string; en: string };
@@ -74,13 +89,16 @@ interface FullSignal {
 interface PreviewData {
   day: string;
   consensus: { bullish: number; bearish: number; neutral: number; total: number };
+  timeframes: { timeframe: TfKey; action: SignalAction }[];
   dataQuality: number;
   candlesUsed: number;
 }
 
+const TF_ORDER: TfKey[] = ["15m", "1h", "4h", "1d"];
+
 export function SignalSection() {
   const { t, locale } = useI18n();
-  const { walletStatus, entitlements, signingIn, login, signIn, loading: authLoading } = useAuth();
+  const { entitlements, signingIn, login, signIn, loading: authLoading } = useAuth();
   const { data: market } = useMarket();
   const [product, setProduct] = useState<PaymentProduct | null>(null);
 
@@ -108,7 +126,7 @@ export function SignalSection() {
       return data.ok ? { signal: data.signal } : { error: data.error ?? "ERROR" };
     },
     enabled: !!hasAccess,
-    staleTime: 60_000,
+    staleTime: 30_000,
     retry: 1,
   });
   const signal = signalQuery.data && "signal" in signalQuery.data ? signalQuery.data.signal : null;
@@ -125,15 +143,16 @@ export function SignalSection() {
             </h2>
             {preview && (
               <p className="mt-2 text-sm text-muted-foreground">
-                {t("signal.day")}: <span className="font-mono font-bold">{preview.day}</span> ·{" "}
-                {preview.candlesUsed} {t("signal.candlesUsed")}
+                {t("signal.liveEngine")} · {preview.candlesUsed} {t("signal.candlesUsed")}
               </p>
             )}
           </div>
           <div className="flex flex-col items-end gap-2">
-            {/* ticking urgency cue — the engine cuts the next signal at
-                00:00 UTC sharp */}
-            <NextSignalCountdown />
+            {market?.snapshot && (
+              <Badge variant="outline" className="gap-1.5 px-3 py-1.5 font-mono" dir="ltr">
+                PENGU ${fmt.price(market.snapshot.priceUsd)}
+              </Badge>
+            )}
             {entitlements?.activeGrant && (
               <Badge className="gap-1.5 bg-buy/15 px-3 py-1.5 text-buy ring-1 ring-buy/30">
                 <Sparkles className="size-3.5" />
@@ -164,7 +183,7 @@ export function SignalSection() {
           <Skeleton className="h-80 w-full rounded-2xl" />
         )}
 
-        {/* free consensus teaser (always visible) */}
+        {/* free consensus teaser (always visible when the full signal is not) */}
         {preview && !signal && (
           <div className="glass-card shimmer mt-6 p-5">
             <div className="mb-4 flex items-center justify-between">
@@ -179,7 +198,24 @@ export function SignalSection() {
               <MoodGauge consensus={preview.consensus} />
 
               <div>
-                <div className="relative h-3.5 overflow-hidden rounded-full bg-muted/60" dir="ltr">
+                {/* timeframe dots — the engine is alive on every horizon */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {preview.timeframes.map((tf) => (
+                    <span
+                      key={tf.timeframe}
+                      className="flex items-center gap-1.5 rounded-full border border-border/50 bg-muted/30 px-2.5 py-1 text-[11px] font-bold"
+                    >
+                      <span
+                        className={cn(
+                          "size-2 rounded-full",
+                          tf.action === "BUY" ? "bg-buy" : tf.action === "SELL" ? "bg-sell" : "bg-hold",
+                        )}
+                      />
+                      {tf.timeframe.toUpperCase()}
+                    </span>
+                  ))}
+                </div>
+                <div className="relative mt-4 h-3.5 overflow-hidden rounded-full bg-muted/60" dir="ltr">
                   <div className="absolute inset-0 flex">
                     <div
                       className="bg-buy transition-all duration-500"
@@ -268,9 +304,6 @@ function PassGate({ onPay }: { onPay: (id: string, name: string, price: number) 
         >
           <Sparkles className="size-5" />
           {t("products.pass7d.name")} — {week.pricePengu} PENGU
-          <Badge className="ms-1 bg-buy/15 text-buy hover:bg-buy/15" variant="secondary">
-            −{week.discountPct}%
-          </Badge>
         </Button>
         <Button
           onClick={() => onPay("PASS_30D", t("products.pass30d.name"), month.pricePengu)}
@@ -280,11 +313,11 @@ function PassGate({ onPay }: { onPay: (id: string, name: string, price: number) 
         >
           <Calendar className="size-5" />
           {t("products.pass30d.name")} — {month.pricePengu} PENGU
-          <Badge className="ms-1 bg-buy/15 text-buy hover:bg-buy/15" variant="secondary">
-            −{month.discountPct}%
-          </Badge>
         </Button>
       </div>
+      <p className="text-[11px] text-muted-foreground">
+        {perDayPrice(month) ? `≈ ${perDayPrice(month)} PENGU / ${t("common.day")}` : null}
+      </p>
       <a
         href="#pricing"
         className="text-xs font-semibold text-primary underline-offset-4 hover:underline"
@@ -310,40 +343,64 @@ function ErrorCard({ error, onRetry }: { error: string; onRetry: () => void }) {
 
 /* ------------------------- full signal ------------------------- */
 
+const actionText = (a: SignalAction) => (a === "BUY" ? "text-buy" : a === "SELL" ? "text-sell" : "text-hold");
+const actionBg = (a: SignalAction) => (a === "BUY" ? "bg-buy" : a === "SELL" ? "bg-sell" : "bg-hold");
+
 function FullSignalCard({ signal, locale }: { signal: FullSignal; locale: string }) {
   const { t } = useI18n();
-  const actionColor =
-    signal.action === "BUY" ? "text-buy" : signal.action === "SELL" ? "text-sell" : "text-hold";
-  const actionBg =
-    signal.action === "BUY" ? "bg-buy" : signal.action === "SELL" ? "bg-sell" : "bg-hold";
   const ActionIcon =
     signal.action === "BUY" ? ArrowUpToLine : signal.action === "SELL" ? ArrowDownToLine : PauseCircle;
+  // band = the five-band nuance behind the three-state verdict (plan §4)
+  const bandLabel = t(`signal.band.${signal.band}`);
 
   return (
     <TooltipProvider delayDuration={200}>
       <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
         {/* left: verdict */}
         <div className="glass-card relative overflow-hidden p-6">
-          <div className={cn("absolute inset-x-0 top-0 h-1", actionBg)} />
+          <div className={cn("absolute inset-x-0 top-0 h-1", actionBg(signal.action))} />
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-medium text-muted-foreground">{t("signal.action")}</div>
-              <div className={cn("mt-1 flex items-center gap-2.5 text-4xl font-black tracking-tight", actionColor)}>
+              <div className={cn("mt-1 flex items-center gap-2.5 text-4xl font-black tracking-tight", actionText(signal.action))}>
                 <ActionIcon className="size-9" />
                 {t(`signal.${signal.action}`)}
               </div>
+              <Badge variant="outline" className="mt-1.5 text-[10px] font-bold text-muted-foreground">
+                {bandLabel}
+              </Badge>
             </div>
             <div className="text-right">
-              <div className="text-xs font-medium text-muted-foreground">{t("signal.compositeScore")}</div>
+              <div className="text-xs font-medium text-muted-foreground">{t("signal.signalScore")}</div>
               <div className="font-mono text-3xl font-black" dir="ltr">
-                {signal.score > 0 ? "+" : ""}
-                {signal.score.toFixed(1)}
+                {Math.round(signal.score)}
+                <span className="text-base text-muted-foreground">/100</span>
               </div>
             </div>
           </div>
 
+          {/* 0-100 score bar (50 = neutral centre mark) */}
+          <div className="mt-4">
+            <div className="relative h-2.5 overflow-hidden rounded-full bg-muted/60" dir="ltr">
+              <div className="absolute left-1/2 top-0 h-full w-px bg-border" />
+              <div
+                className={cn("absolute top-0 h-full", actionBg(signal.action))}
+                style={
+                  signal.score >= 50
+                    ? { left: "50%", width: `${Math.min(50, signal.score - 50)}%` }
+                    : { right: "50%", width: `${Math.min(50, 50 - signal.score)}%` }
+                }
+              />
+            </div>
+            <div className="mt-1 flex justify-between text-[10px] text-muted-foreground" dir="ltr">
+              <span>0 · SELL</span>
+              <span>50</span>
+              <span>BUY · 100</span>
+            </div>
+          </div>
+
           {/* confidence gauge */}
-          <div className="mt-6">
+          <div className="mt-5">
             <div className="mb-1.5 flex items-center justify-between text-xs">
               <span className="flex items-center gap-1 font-semibold">
                 <Gauge className="size-3.5" />
@@ -357,30 +414,65 @@ function FullSignalCard({ signal, locale }: { signal: FullSignal; locale: string
             </div>
           </div>
 
-          {/* levels grid */}
-          <div className="mt-6 grid grid-cols-2 gap-2.5">
-            <Level
-              label={t("signal.entryZone")}
-              value={signal.entryLow && signal.entryHigh ? `${fmt.price(signal.entryLow)} – ${fmt.price(signal.entryHigh)}` : null}
-            />
-            <Level label={t("signal.stopLoss")} value={fmt.price(signal.stopLoss)} danger />
-            <Level label={t("signal.takeProfit1")} value={fmt.price(signal.takeProfit1)} good />
-            <Level label={t("signal.takeProfit2")} value={fmt.price(signal.takeProfit2)} good />
-            <Level
-              label={t("signal.expectedRange")}
-              value={
-                signal.expectedRangeLow && signal.expectedRangeHigh
-                  ? `${fmt.price(signal.expectedRangeLow)} – ${fmt.price(signal.expectedRangeHigh)}`
-                  : null
-              }
-            />
-            <Level
-              label={t("signal.riskReward")}
-              value={signal.riskReward ? `1 : ${signal.riskReward.toFixed(2)}` : null}
-            />
-            <Level label={t("signal.support")} value={fmt.price(signal.support)} />
-            <Level label={t("signal.resistance")} value={fmt.price(signal.resistance)} />
+          {/* volatility warning (plan §16 — honest risk note) */}
+          {signal.volatilityWarning && (
+            <div className="mt-4 flex items-center gap-2 rounded-lg border border-hold/30 bg-hold/10 px-3 py-2 text-[11px] font-semibold text-hold">
+              <TriangleAlert className="size-4 shrink-0" />
+              {t("signal.volatilityWarning")}
+            </div>
+          )}
+
+          {/* timeframe grid — one verdict per horizon (plan §14) */}
+          <div className="mt-5 grid grid-cols-4 gap-2">
+            {TF_ORDER.map((tf) => {
+              const r = signal.timeframes[tf];
+              if (!r) return null;
+              return (
+                <Tooltip key={tf}>
+                  <TooltipTrigger asChild>
+                    <div className="rounded-lg border border-border/40 bg-muted/20 px-2 py-2 text-center transition-colors hover:border-primary/30">
+                      <div className="text-[10px] font-bold text-muted-foreground">{tf.toUpperCase()}</div>
+                      <div className={cn("mt-0.5 text-xs font-black", actionText(r.action))}>
+                        {t(`signal.${r.action}`)}
+                      </div>
+                      <div className="mt-0.5 font-mono text-[10px] text-muted-foreground" dir="ltr">
+                        {Math.round(r.score)}
+                      </div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">
+                    {t("signal.tfScore")}: {r.score}/100 · {t("signal.confidence")}: {r.confidence}%
+                    {r.atrPct !== null ? ` · ATR ${r.atrPct}%` : ""}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
           </div>
+
+          {/* levels grid (only meaningful when action is actionable) */}
+          {signal.action !== "WAIT" && (
+            <div className="mt-5 grid grid-cols-2 gap-2.5">
+              <Level
+                label={t("signal.entryZone")}
+                value={signal.entryLow && signal.entryHigh ? `${fmt.price(signal.entryLow)} – ${fmt.price(signal.entryHigh)}` : null}
+              />
+              <Level label={t("signal.stopLoss")} value={fmt.price(signal.stopLoss)} danger />
+              <Level label={t("signal.takeProfit1")} value={fmt.price(signal.takeProfit1)} good />
+              <Level label={t("signal.takeProfit2")} value={fmt.price(signal.takeProfit2)} good />
+              <Level
+                label={t("signal.expectedRange")}
+                value={
+                  signal.expectedRangeLow && signal.expectedRangeHigh
+                    ? `${fmt.price(signal.expectedRangeLow)} – ${fmt.price(signal.expectedRangeHigh)}`
+                    : null
+                }
+              />
+              <Level
+                label={t("signal.riskReward")}
+                value={signal.riskReward ? `1 : ${signal.riskReward.toFixed(2)}` : null}
+              />
+            </div>
+          )}
         </div>
 
         {/* right: factors + reasoning */}
@@ -388,6 +480,7 @@ function FullSignalCard({ signal, locale }: { signal: FullSignal; locale: string
           <h3 className="flex items-center gap-2 text-sm font-bold">
             <Target className="size-4 text-primary" />
             {t("signal.factors")}
+            <Badge variant="outline" className="ms-1 text-[10px] text-muted-foreground">4H</Badge>
           </h3>
           <FactorList factors={signal.factors} className="mt-3 max-h-72 overflow-y-auto pe-1 nice-scroll" />
 

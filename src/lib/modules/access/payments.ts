@@ -1,34 +1,36 @@
 /**
- * On-chain payment verification for PENGU (ERC-20) transfers on Abstract.
+ * On-chain payment verification — STATELESS, multi-token (target plan §7, §10).
  *
- * Trust model: the client NEVER tells us "I paid". It only submits a tx hash.
- * We verify everything ourselves against the Abstract RPC:
+ * Trust model: the client NEVER tells us "I paid". It only submits a tx hash
+ * (+ the product it intends to buy, and for non-PENGU tokens the signed
+ * quote it was shown). We verify everything ourselves against the Abstract RPC:
+ *
  *   1. receipt exists and status == success
- *   2. an ERC-20 Transfer event log exists where:
- *        token == PENGU contract
- *        to    == treasury address
- *        from  == the authenticated user's wallet
- *        value >= pass price (in token base units)
- *   3. the tx hash has not been credited before (replay protection)
+ *   2. the qualifying transfer exists:
+ *        ERC-20  → Transfer log where token == registry token,
+ *                  to == treasury, from == the session wallet,
+ *                  value ≥ required amount
+ *        native  → tx.value ≥ quoted ETH amount AND tx.to == treasury
+ *   3. the product's price requirement is met:
+ *        PENGU   → exact catalog price (prices ARE PENGU-denominated)
+ *        others  → HMAC-SIGNED QUOTE (fresh, product-bound) — no DB needed
+ *                  to remember what was quoted
  *
- * Session-key-free BY DESIGN: payments are plain ERC-20 transfers initiated
- * by the user's own wallet — no approvals, no allowances, no session keys,
- * so nothing here is subject to Abstract's session-key review policies.
- * A future session-key autopay would observe its transfers through the same
- * verifyAndCredit() pipeline (see docs/ACCESS-MODEL.md § Future).
+ * NO replay database: entitlements derive from the PAYMENT BLOCK TIMESTAMP
+ * (expiry = blockTime + plan duration), so replaying an old tx can never
+ * mint a future-dated pass — the chain itself is the ledger.
  *
  * @module lib/modules/access/payments
  */
+import { createHmac } from "node:crypto";
 import { createPublicClient, http, type PublicClient, type Log } from "viem";
 import { serverConfig, publicConfig } from "@/lib/config";
-import { db } from "@/lib/db";
 import { createLogger } from "@/lib/logger";
-import { passById, LIFETIME_GRANT_DAYS } from "./passes";
+import { getSnapshot } from "../market/service";
+import { passById, isLifetimePass, LIFETIME_GRANT_DAYS, DAY_MS } from "./passes";
+import { payTokenByKey, payTokenByAddress, toBaseUnits, fromBaseUnits, TRANSFER_TOPIC, type PayTokenKey } from "./tokens";
 
 const log = createLogger("payments");
-
-const TRANSFER_TOPIC =
-  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" as const;
 
 let client: PublicClient | null = null;
 function rpc(): PublicClient {
@@ -38,24 +40,136 @@ function rpc(): PublicClient {
   return client;
 }
 
+/* ------------------------------------------------------------------ */
+/* Signed quotes (non-PENGU tokens)                                    */
+/* ------------------------------------------------------------------ */
+
+export interface SignedQuote {
+  product: string;
+  token: PayTokenKey;
+  /** human amount in the quote token */
+  amountToken: number;
+  quotedAt: number;
+  sig: string;
+}
+
+function quoteMac(product: string, token: string, amountRaw: string, quotedAt: number): string {
+  return createHmac("sha256", serverConfig.SESSION_SECRET)
+    .update(`${product}|${token}|${amountRaw}|${quotedAt}`)
+    .digest("base64url");
+}
+
+/** Build a signed quote for a product in a non-PENGU token. */
+export function buildQuote(product: string, token: PayTokenKey, amountToken: number, decimals: number): SignedQuote {
+  const quotedAt = Date.now();
+  const amountRaw = toBaseUnits(amountToken, decimals).toString();
+  return {
+    product,
+    token,
+    amountToken,
+    quotedAt,
+    sig: quoteMac(product, token, amountRaw, quotedAt),
+  };
+}
+
+/** Verify a signed quote: our MAC, right product/token, fresh enough. */
+function verifyQuote(
+  quote: SignedQuote,
+  product: string,
+  token: PayTokenKey,
+): { ok: boolean; amountRaw: bigint | null } {
+  if (!quote || typeof quote !== "object") return { ok: false, amountRaw: null };
+  if (quote.product !== product || quote.token !== token) return { ok: false, amountRaw: null };
+  const age = Date.now() - Number(quote.quotedAt);
+  if (!Number.isFinite(age) || age < -60_000 || age > serverConfig.PAYMENT_QUOTE_TTL_MS) {
+    return { ok: false, amountRaw: null };
+  }
+  // recompute the MAC from the declared amount
+  const decimals = payTokenByKey(token)?.decimals ?? 18;
+  const amountRaw = toBaseUnits(Number(quote.amountToken), decimals);
+  const expected = quoteMac(product, token, amountRaw.toString(), Number(quote.quotedAt));
+  if (expected !== quote.sig) return { ok: false, amountRaw: null };
+  return { ok: true, amountRaw };
+}
+
+/* ------------------------------------------------------------------ */
+/* Receipt inspection                                                  */
+/* ------------------------------------------------------------------ */
+
 export interface TransferCheck {
   ok: boolean;
   error?: string;
   amountRaw?: bigint;
+  token?: PayTokenKey;
   from?: string;
   to?: string;
   blockNumber?: bigint;
+  /** filled by the native-transfer inspector (saves one RPC round-trip) */
+  blockTimestampMs?: number;
 }
 
-/** Inspect a receipt for a qualifying PENGU transfer to the treasury. */
-async function inspectTransfer(
+/** Inspect a receipt for a qualifying ERC-20 transfer to the treasury. */
+async function inspectErc20Transfer(
   txHash: string,
-  expectedFrom?: string,
-  minAmountRaw?: bigint,
+  expectedFrom: string,
 ): Promise<TransferCheck> {
-  let receipt;
+  const receipt = await getReceipt(txHash);
+  if (!receipt.ok) return receipt;
+
+  const treasury = publicConfig.treasury.toLowerCase();
+  for (const l of receipt.receipt!.logs as Log[]) {
+    if (l.topics[0]?.toLowerCase() !== TRANSFER_TOPIC) continue;
+    const token = payTokenByAddress(l.address);
+    if (!token) continue;
+    const from = "0x" + (l.topics[1] ?? "").slice(26);
+    const to = "0x" + (l.topics[2] ?? "").slice(26);
+    if (to.toLowerCase() !== treasury) continue;
+    if (from.toLowerCase() !== expectedFrom.toLowerCase()) continue;
+    const value = BigInt(l.data === "0x" ? 0 : l.data);
+    return { ok: true, amountRaw: value, token: token.key, from, to, blockNumber: receipt.receipt!.blockNumber };
+  }
+  return { ok: false, error: "NO_QUALIFYING_TRANSFER" };
+}
+
+/** Inspect a receipt for a qualifying native-ETH transfer to the treasury. */
+async function inspectNativeTransfer(
+  txHash: string,
+  expectedFrom: string,
+): Promise<TransferCheck> {
+  const receipt = await getReceipt(txHash);
+  if (!receipt.ok) return receipt;
+
+  const [tx, block] = await Promise.all([
+    rpc().getTransaction({ hash: txHash as `0x${string}` }),
+    rpc().getBlock({ blockNumber: receipt.receipt!.blockNumber }),
+  ]);
+  const treasury = publicConfig.treasury.toLowerCase();
+  if ((tx.to ?? "").toLowerCase() !== treasury) return { ok: false, error: "NO_QUALIFYING_TRANSFER" };
+  if (tx.from.toLowerCase() !== expectedFrom.toLowerCase()) {
+    return { ok: false, error: "NO_QUALIFYING_TRANSFER" };
+  }
+  return {
+    ok: true,
+    amountRaw: tx.value,
+    token: "ETH",
+    from: tx.from,
+    to: tx.to ?? "",
+    blockNumber: receipt.receipt!.blockNumber,
+    blockTimestampMs: Number(block.timestamp) * 1000,
+  };
+}
+
+interface ReceiptResult {
+  ok: boolean;
+  error?: string;
+  receipt?: Awaited<ReturnType<PublicClient["getTransactionReceipt"]>>;
+}
+
+async function getReceipt(txHash: string): Promise<ReceiptResult> {
   try {
-    receipt = await rpc().getTransactionReceipt({ hash: txHash as `0x${string}` });
+    const receipt = await rpc().getTransactionReceipt({ hash: txHash as `0x${string}` });
+    if (receipt.status !== "success") return { ok: false, error: "TX_FAILED" };
+    return { ok: true, receipt };
   } catch {
     // viem throws TransactionReceiptNotFoundError both for unknown hashes
     // and for txs that are known but not yet mined. Distinguish them so the
@@ -68,61 +182,44 @@ async function inspectTransfer(
     }
     return { ok: false, error: "TX_NOT_FOUND" };
   }
-
-  if (receipt.status !== "success") return { ok: false, error: "TX_FAILED" };
-
-  const pengu = publicConfig.penguToken.toLowerCase();
-  const treasury = publicConfig.treasury.toLowerCase();
-
-  for (const l of receipt.logs as Log[]) {
-    if (l.topics[0]?.toLowerCase() !== TRANSFER_TOPIC) continue;
-    if (l.address.toLowerCase() !== pengu) continue;
-    const from = "0x" + (l.topics[1] ?? "").slice(26);
-    const to = "0x" + (l.topics[2] ?? "").slice(26);
-    if (to.toLowerCase() !== treasury) continue;
-    if (expectedFrom && from.toLowerCase() !== expectedFrom.toLowerCase()) continue;
-    const value = BigInt(l.data === "0x" ? 0 : l.data);
-    if (minAmountRaw && value < minAmountRaw) continue;
-    return { ok: true, amountRaw: value, from, to, blockNumber: receipt.blockNumber };
-  }
-  return { ok: false, error: "NO_QUALIFYING_TRANSFER" };
 }
 
-export const PENGU_DECIMALS = 18;
-
-/** Convert human PENGU amount to base units (18 decimals). */
-export function toBaseUnits(amount: number): bigint {
-  const [int, frac = ""] = amount.toFixed(18).split(".");
-  const fracPadded = (frac + "0".repeat(18)).slice(0, 18);
-  return BigInt(int + fracPadded);
-}
-
-/** Convert base units to human PENGU amount. */
-export function fromBaseUnits(raw: bigint): number {
-  return Number(raw) / 1e18;
-}
+/* ------------------------------------------------------------------ */
+/* Full verification pipeline                                          */
+/* ------------------------------------------------------------------ */
 
 export interface VerifyPaymentResult {
   ok: boolean;
   error?: string;
   amountToken?: number;
-  txHash?: string;
+  token?: PayTokenKey;
+  /** mint-ready entitlement derived from the payment block timestamp */
+  entitlement?: {
+    product: string;
+    expiresAt: number; // epoch ms
+    lifetime: boolean;
+    txHash: string;
+  };
 }
 
 /**
- * Full payment verification + crediting pipeline for access passes.
+ * Verify a payment and derive the entitlement — no storage anywhere.
  *
- * Every product is a time pass: the grant extends from the later of
- * (now, current active expiry) so early renewals never lose paid days.
- * PASS_LIFETIME grants ≈100 years — practically forever.
+ * @param params.txHash         the payment transaction
+ * @param params.userAddress    the session wallet (must be the sender)
+ * @param params.product        the product being purchased (PASS_*)
+ * @param params.quote          signed quote (required for non-PENGU tokens)
+ * @param params.currentExpiry  current entitlement expiry (stacking support);
+ *                              pass undefined for a fresh computation
  */
-export async function verifyAndCredit(params: {
+export async function verifyPayment(params: {
   txHash: string;
   userAddress: string;
   product: string;
-  expectedPrice: number;
+  quote?: SignedQuote;
+  currentExpiry?: number;
 }): Promise<VerifyPaymentResult> {
-  const { txHash, userAddress, product, expectedPrice } = params;
+  const { txHash, userAddress, product, quote, currentExpiry } = params;
   const normalized = txHash.toLowerCase();
 
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) return { ok: false, error: "INVALID_TX_HASH" };
@@ -130,62 +227,70 @@ export async function verifyAndCredit(params: {
   const pass = passById(product);
   if (!pass) return { ok: false, error: "UNKNOWN_PRODUCT" };
 
-  // replay protection
-  const existing = await db.payment.findUnique({ where: { txHash: normalized } });
-  if (existing) return { ok: false, error: "TX_ALREADY_USED" };
-
-  const minRaw = toBaseUnits(expectedPrice);
-  const check = await inspectTransfer(normalized, userAddress, minRaw);
+  // 1. Inspect the chain — accept either a qualifying ERC-20 transfer or a
+  //    native ETH transfer to the treasury from the session wallet.
+  let check: TransferCheck;
+  check = await inspectErc20Transfer(normalized, userAddress);
+  if (!check.ok && check.error === "NO_QUALIFYING_TRANSFER") {
+    check = await inspectNativeTransfer(normalized, userAddress);
+  }
   if (!check.ok) return { ok: false, error: check.error };
 
-  const amountToken = fromBaseUnits(check.amountRaw!);
+  const tokenKey = check.token!;
+  const tokenDef = payTokenByKey(tokenKey);
+  if (!tokenDef) return { ok: false, error: "UNSUPPORTED_TOKEN" };
 
-  // find the user record
-  const user = await db.user.findUnique({ where: { address: userAddress.toLowerCase() } });
-  if (!user) return { ok: false, error: "USER_NOT_FOUND" };
+  // 2. Amount requirement per token
+  let amountRaw = check.amountRaw!;
+  if (tokenKey === "PENGU") {
+    // prices are PENGU-denominated → exact catalog price
+    const required = toBaseUnits(pass.pricePengu, tokenDef.decimals);
+    if (amountRaw < required) return { ok: false, error: "INSUFFICIENT_AMOUNT" };
+  } else {
+    // non-PENGU → must present a valid signed quote for THIS product+token
+    if (!quote) return { ok: false, error: "QUOTE_REQUIRED" };
+    const q = verifyQuote(quote, product, tokenKey);
+    if (!q.ok || q.amountRaw === null) return { ok: false, error: "QUOTE_INVALID" };
+    // tolerate small downward slippage vs the signed quote
+    const floor = (q.amountRaw * BigInt(100 - serverConfig.PAYMENT_SLIPPAGE_PCT)) / 100n;
+    if (amountRaw < floor) return { ok: false, error: "INSUFFICIENT_AMOUNT" };
+  }
 
-  // record payment + grant access atomically
-  const now = new Date();
+  // 3. Payment block timestamp → honest expiry (replay of an old tx can
+  //    never mint a future-dated pass)
+  const blockTimestampMs = check.blockTimestampMs ?? (await (async () => {
+    const block = await rpc().getBlock({ blockNumber: check.blockNumber! });
+    return Number(block.timestamp) * 1000;
+  })());
   const grantDays = pass.days ?? LIFETIME_GRANT_DAYS;
-  const result = await db.$transaction(async (tx) => {
-    // double-check uniqueness inside the transaction
-    const dupe = await tx.payment.findUnique({ where: { txHash: normalized } });
-    if (dupe) throw new Error("TX_ALREADY_USED");
+  const base = Math.max(blockTimestampMs, currentExpiry ?? 0);
+  const expiresAt = base + grantDays * DAY_MS;
 
-    const payment = await tx.payment.create({
-      data: {
-        txHash: normalized,
-        chainId: serverConfig.NEXT_PUBLIC_CHAIN_ID,
-        fromAddress: userAddress.toLowerCase(),
-        toAddress: publicConfig.treasury,
-        token: publicConfig.penguToken,
-        amountRaw: check.amountRaw!.toString(),
-        amountToken,
-        product,
-        status: "VERIFIED",
-        blockNumber: check.blockNumber ?? null,
-        userId: user.id,
-      },
-    });
-
-    // all passes stack: extend from the later of (now, current expiry)
-    const active = await tx.accessGrant.findFirst({
-      where: { userId: user.id, expiresAt: { gt: now } },
-      orderBy: { expiresAt: "desc" },
-    });
-    const base = active ? active.expiresAt : now;
-    await tx.accessGrant.create({
-      data: {
-        userId: user.id,
-        product,
-        startsAt: now,
-        expiresAt: new Date(base.getTime() + grantDays * 24 * 3600 * 1000),
-        sourcePaymentId: payment.id,
-      },
-    });
-    return payment;
+  const amountToken = fromBaseUnits(amountRaw, tokenDef.decimals);
+  log.info("payment verified", {
+    txHash: normalized,
+    product,
+    token: tokenKey,
+    amountToken,
+    expiresAt,
   });
 
-  log.info("payment credited", { txHash: normalized, product, amountToken, userId: user.id });
-  return { ok: true, amountToken, txHash: result.txHash };
+  return {
+    ok: true,
+    amountToken,
+    token: tokenKey,
+    entitlement: {
+      product,
+      expiresAt,
+      lifetime: isLifetimePass(product),
+      txHash: normalized,
+    },
+  };
+}
+
+/** Live PENGU price (USD) — used to build payment quotes. */
+export async function fetchPenguUsd(): Promise<number> {
+  const snap = await getSnapshot();
+  if (!snap.priceUsd || snap.priceUsd <= 0) throw new Error("NO_PENGU_PRICE");
+  return snap.priceUsd;
 }

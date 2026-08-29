@@ -1,8 +1,8 @@
 # 🐧 PenguSignals
 
-**سیگنال‌های هوشمند خرید و فروش PENGU روی بلاکچین Abstract**
+**سیگنال‌های هوشمند خرید و فروش PENGU روی بلاکچین Abstract — معماری v4 کاملاً بدون دیتابیس**
 
-سکوی تحلیل تکنیکال ارز PENGU (Pudgy Penguins) که هر روز با اجرای ۱۱ خانواده اندیکاتور روی داده‌های واقعی بازار، سیگنال **خرید / فروش / نگهداری** با سطح اطمینان و پلن مدیریت ریسک تولید می‌کند. ورود با کیف پول Abstract (AGW)، پرداخت با توکن PENGU و تأیید کامل روی زنجیره.
+سکوی تحلیل تکنیکال ارز PENGU (Pudgy Penguins) که با اجرای **۵ خانواده اندیکاتور** روی **۴ تایم‌فریم زنده** (15m / 1h / 4h / 1d)، سیگنال **خرید / فروش / انتظار** با امتیاز ۰ تا ۱۰۰، سطح اطمینان، سطوح ریسک ATR و توضیح دوزبانه تولید می‌کند. ورود با کیف پول Abstract (AGW)، پرداخت با PENGU یا ETH و تأیید کامل روی زنجیره — **بدون هیچ دیتابیسی**.
 
 ---
 
@@ -11,34 +11,30 @@
 | قابلیت | توضیح |
 |---|---|
 | 🔐 **ورود با کیف پول** | احراز هویت SIWE با امضای کیف پول — پشتیبانی از Abstract Global Wallet (اسمارت اکانت) و کیف‌های EOA از طریق ERC-6492/EIP-1271 |
-| 📊 **داده واقعی** | قیمت لحظه‌ای از DexScreener (استخر Abstract)، کندل‌های تاریخی از Binance با fallback به CoinGecko — بدون هیچ دیتای ساختگی |
-| 🧠 **موتور تحلیل ۱۱_layer** | EMA، SMA، RSI، MACD، Bollinger، Stochastic، OBV، VWAP، Momentum، Volume regime، Support/Resistance — وزن‌دهی شفاف و قابل ممیزی |
-| 🎯 **مدیریت ریسک** | ناحیه ورود، حد ضرر و اهداف سود مبتنی بر ATR + نسبت ریسک به ریوارد |
-| 💰 **پرداخت روی زنجیره** | تأیید تراکنش ERC-20 کاملاً سمت سرور از طریق RPC رسمی Abstract — صفر اعتماد به کلاینت |
-| 📈 **سابقه واقعی** | هر سیگنال ۲۴ ساعت بعد به‌صورت خودکار با قیمت واقعی ارزیابی می‌شود (WIN/LOSS) |
+| 🗄 **بدون دیتابیس** | هیچ داده‌ای ذخیره نمی‌شود: بازار زنده fetch می‌شود، دسترسی‌ها داخل session امضاشده سفر می‌کنند، پرداخت‌ها روی زنجیره راستی‌آزمایی می‌شوند و تاریخچه از کندل‌های عمومی **بازمحاسبه قطعی** می‌شود |
+| 🕐 **موتور چند-تایم‌فریمی** | ۱۵ دقیقه، ۱ ساعت، ۴ ساعت و روزانه — هر تایم‌فریم امتیاز مستقل ۰-۱۰۰ می‌گیرد و سیگنال اصلی از ترکیب وزن‌دار آن‌ها ساخته می‌شود |
+| 🧠 **موتور تحلیل ۵ فاکتوری** | روند EMA20/50 (۳۰٪) + مومنتوم ATR-نرمال (۲۵٪) + MACD (۲۰٪) + RSI (۱۵٪) + حجم (۱۰٪) — وزن‌دهی شفاف و قابل ممیزی، نه ۲۰ اندیکاتور |
+| 💳 **پرداخت چند-توکنی روی زنجیره** | PENGU (ERC-20) یا ETH (native) به خزانه — کوت‌های HMAC-امضاشده با نرخ قفل‌شده ۳۰ دقیقه‌ای؛ تأیید کامل سمت سرور از طریق RPC رسمی Abstract |
+| ⛓ **بازیابی از زنجیره** | زنجیره خودش دیتابیس است: اسکن `eth_getLogs` پرداخت‌های شما به خزانه را پیدا کرده و اشتراک را دوباره فعال می‌کند — حتی بعد از پاک کردن کوکی‌ها |
+| 📈 **سابقه بازتولیدپذیر** | هر سیگنال روزگذشته از کندل‌های عمومی Binance بازمحاسبه می‌شود — هرکسی می‌تواند صحت track record را راستی‌آزمایی کند |
+| 🔔 **هشدار قیمت محلی** | هشدارها در localStorage همین مرورگر ذخیره و سمت کلاینت ارزیابی می‌شوند — صفر سرور، صفر دیتابیس |
 | 🌍 **دوزبانه** | فارسی (RTL) و انگلیسی — افزودن زبان جدید = افزودن یک فایل JSON |
-| ⚡ **مدرن و سریع** | Next.js 16 App Router، React 19، Tailwind 4، TypeScript strict |
+| ⚡ **مدرن و سریع** | Next.js 16 App Router، React 19، Tailwind 4، TypeScript strict، استقرار Cloudflare Workers رایگان |
 
-## 💳 تعرفه‌ها (مدل دسترسی v3 — متعادل و پلکانی، بدون Session Key)
+## 💳 تعرفه‌ها (مدل دسترسی v4 — طبق معماری هدف)
 
-ثبت‌نام و مرور **رایگان** است: بازار زنده، سابقه سیگنال‌ها، پیش‌نمایش اجماع اندیکاتورها و داشبورد شخصی — بدون محتوای سیگنال. فقط سیگنال‌ها نیاز به «پاس دسترسی» دارند:
+ثبت‌نام و مرور **رایگان** است: بازار زنده، سابقه سیگنال‌ها، پیش‌نمایش اجماع و داشبورد شخصی — بدون محتوای سیگنال. فقط سیگنال کامل نیاز به «پاس دسترسی» دارد:
 
-| پاس | قیمت | تخفیف | ≈ روزانه | مدت |
-|---|---|---|---|---|
-| رایگان | **۰** | — | — | همیشه — ورود و مرور بدون سیگنال |
-| یک‌روزه | **۱۰ PENGU** | — | ۱۰.۰ | ۱ روز |
-| ۷ روزه | **۶۳ PENGU** | ۱۰٪ (۷۰→۶۳) | ۹.۰ | ۷ روز |
-| ۳۰ روزه | **۲۴۰ PENGU** | ۲۰٪ (۳۰۰→۲۴۰) | ۸.۰ | ۳۰ روز |
-| یک‌ساله | **۲۵۵۵ PENGU** | ۳۰٪ (۳۶۵۰→۲۵۵۵) | ۷.۰ | ۳۶۵ روز |
-| مادام‌العمر | **۵۱۱۰ PENGU** | ۳۰٪ (۷۳۰۰→۵۱۱۰) | — | ∞ (دو برابر پلن سالانه) |
+| پاس | قیمت | ≈ روزانه | مدت |
+|---|---|---|---|
+| رایگان | **۰** | — | همیشه — ورود و مرور بدون سیگنال |
+| یک‌روزه | **۱۰ PENGU** | ۱۰.۰ | ۱ روز |
+| ۷ روزه | **۵۰ PENGU** | ۷.۱ | ۷ روز |
+| ۳۰ روزه | **۳۰۰ PENGU** | ۱۰.۰ | ۳۰ روز |
+| یک‌ساله | **۱۵۰۰ PENGU** | ۴.۱ | ۳۶۵ روز |
+| مادام‌العمر | **۳۰۰۰ PENGU** | — | ∞ (دو برابر پلن سالانه) |
 
-مبنای قیمت **۱۰ پنگو برای یک روز** است و با افزایش مدت، تخفیف پلکانی اعمال می‌شود (۰٪ → ۱۰٪ → ۲۰٪ → ۳۰٪ حداکثر)؛ نتیجه نردبان قیمتی روزانه ۱۰ → ۹ → ۸ → ۷ پنگو است. پاس مادام‌العمر دقیقاً دو برابر پلن سالانه قیمت‌گذاری شده است.
-
-پاس‌ها روی هم انباشته می‌شوند (تمدید زودتر = از دست ندادن روزها). منبع واحد تعرفه: `src/lib/modules/access/passes.ts`.
-
-پرداخت با ترانسفر معمولی ERC-20 به آدرس خزانه انجام می‌شود و **فقط هش تراکنش** به سرور ارسال می‌شود — تأیید کامل روی زنجیره Abstract و سمت سرور، بدون Session Key و بدون approval. جزئیات کامل: `docs/ACCESS-MODEL.md`.
-
-> 📖 **راهنمای پرداخت برای کاربران:** دیالوگ پرداخت علاوه بر مسیر کیف پول، مسیر «قبلاً پرداخت کرده‌اید؟» (ورود دستی هش) و نمایش موجودی ETH برای کارمزد را دارد. رفع اشکال‌های رایج (پاپ‌آپ بلاک، تایم‌اوت، کارمزد) در `docs/WALLET-AND-TRANSACTIONS.md §8`.
+پاس‌ها روی هم انباشته می‌شوند (تمدید زودتر = از دست ندادن روزها). منبع واحد تعرفه: `src/lib/modules/access/passes.ts`. پرداخت با ETH هم ممکن است (تبدیل لحظه‌ای با کوت امضاشده).
 
 ## 🚀 اجرای محلی
 
@@ -46,7 +42,6 @@
 # پیش‌نیاز: Node.js 20+ / Bun 1.1+
 bun install
 cp .env.example .env        # مقادیر را تنظیم کنید (حداقل SESSION_SECRET)
-bun run db:push             # ساخت دیتابیس SQLite
 bun run dev                 # http://localhost:3000
 ```
 
@@ -55,37 +50,62 @@ bun run dev                 # http://localhost:3000
 ```bash
 curl http://localhost:3000/api                     # سلامت سرویس
 curl http://localhost:3000/api/market/overview     # داده زنده بازار (رایگان)
-curl http://localhost:3000/api/signal/preview      # پیش‌نمایش سیگنال امروز
-curl http://localhost:3000/api/signal/history      # سابقه عمومی
+curl http://localhost:3000/api/signal/preview      # پیش‌نمایش: اجماع + تایم‌فریم‌ها
+curl http://localhost:3000/api/signal/history      # سابقه عمومی (بازمحاسبه قطعی)
+curl http://localhost:3000/api/payment/config      # توکن‌ها + کوت‌های امضاشده
 ```
 
-## 🏗 معماری
+## 🏗 معماری v4 — Stateless
+
+```text
+User Browser (Next.js 16)
+        │
+        ├── AGW Login (SIWE + stateless HMAC nonce)
+        ▼
+Cloudflare Worker (App Router — بدون دیتابیس)
+        │
+        ├── Snapshot: Binance ticker → DexScreener enrich → CoinGecko → CoinMarketCap
+        ├── Candles per TF: Binance klines → CoinGecko fallback
+        │       (cache: 15m→30s · 1h→60s · 4h/1d→120s)
+        │
+        ├── Signal Engine: 5 factors × 4 timeframes → score 0-100
+        │       BUY ≥75 / WAIT / SELL <25 + confidence + ATR levels
+        │
+        ├── History: deterministic recompute از کندل‌های عمومی (304+ روز)
+        │
+        └── Payments: on-chain verify → entitlement داخل session امضاشده
+                └── Recovery: eth_getLogs treasury scan (زنجیره = دیتابیس)
+```
+
+```text
+Database     ❌      PostgreSQL   ❌      Redis        ❌
+Cloudflare Worker ✅  In-memory cache ✅  Public APIs  ✅
+AGW          ✅      On-chain payment ✅ Treasury     ✅
+```
 
 ```
 src/
 ├── app/
 │   ├── page.tsx                  # اپ تک‌صفحه‌ای (تنها روت کاربر)
 │   └── api/
-│       ├── auth/                 # nonce / verify / session (SIWE)
+│       ├── auth/                 # nonce / verify / session (SIWE stateless)
+│       ├── access/restore/       # بازیابی اشتراک از زنجیره (eth_getLogs)
 │       ├── market/overview/      # داده زنده بازار (رایگان)
-│       ├── signal/               # preview (رایگان) / today (پولی) / history
-│       ├── payment/verify/       # تأیید on-chain پرداخت
-│       ├── me/dashboard/         # داشبورد کاربر
-│       ├── alerts/               # هشدار قیمت (CRUD)
-│       └── user-profile/         # پروفایل پرتال Abstract (پروکسی cache)
+│       ├── signal/               # preview (رایگان) / today (پولی) / history / detail
+│       ├── payment/              # config (کوت‌ها) / verify / history
+│       └── me/dashboard/         # داشبورد کاربر (از session + اسکن سبک)
 ├── lib/
 │   ├── config.ts                 # کانفیگ سرور (zod-validated، fail-fast)
 │   ├── public-config.ts          # کانفیگ کلاینت (NEXT_PUBLIC_*)
 │   ├── cache.ts                  # TTL cache + stale-while-revalidate
-│   ├── logger.ts                 # لاگ ساختاریافته JSON
 │   ├── security/
-│   │   ├── session.ts            # کوکی‌های HMAC-SHA256 (httpOnly)
-│   │   ├── siwe.ts               # nonce + ساخت پیام + تأیید امضا
+│   │   ├── session.ts            # سشن HMAC + entitlement claim (stateless)
+│   │   ├── siwe.ts               # nonce خودامضاشده + تأیید امضا (EIP-1271)
 │   │   └── rate-limit.ts         # محدودیت نرخ پنجره‌لغزان
 │   └── modules/
-│       ├── market/               # dexscreener / binance / coingecko / service
-│       ├── analysis/             # indicators / signals / engine / signal-service
-│       └── access/               # payments (تأیید on-chain) / entitlements
+│       ├── market/               # binance / dexscreener / coingecko / coinmarketcap
+│       ├── analysis/             # indicators / signals (۵ فاکتور) / engine / signal-service
+│       └── access/               # passes / tokens / payments / entitlements / restore
 ├── components/
 │   ├── pengu/                    # کامپوننت‌های اپ
 │   ├── i18n/                     # سیستم چندزبانه
@@ -100,42 +120,33 @@ src/
 | سند | محتوا |
 |---|---|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | معماری کل سیستم و جریان‌های اصلی |
-| [SECURITY.md](docs/SECURITY.md) | مدل تهدید، سشن، rate limit، مدل اعتماد پرداخت |
-| [API.md](docs/API.md) | مرجع کامل endpointها (متدها، خطاها، مدل داده) |
+| [SECURITY.md](docs/SECURITY.md) | مدل تهدید، سشن stateless، مدل اعتماد پرداخت |
+| [API.md](docs/API.md) | مرجع کامل endpointها |
 | [WALLET-AND-TRANSACTIONS.md](docs/WALLET-AND-TRANSACTIONS.md) | کیف پول/امضا/تراکنش — مبتنی بر مستندات رسمی Abstract |
 | [TECH-STACK.md](docs/TECH-STACK.md) | فناوری‌ها، نسخه‌ها، دلیل انتخاب‌ها |
+| [ACCESS-MODEL.md](docs/ACCESS-MODEL.md) | مدل دسترسی، تعرفه و معماری بدون دیتابیس |
+| [AUDIT.md](docs/AUDIT.md) | گزارش ممیزی + نتایج QA |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | استقرار (Cloudflare Workers) |
 | [BACKEND.md](docs/BACKEND.md) | راهنمای توسعه‌دهندهٔ سرور |
-| [FRONTEND.md](docs/FRONTEND.md) | راهنمای توسعه‌دهندهٔ کلاینت (کامپوننت‌ها، RTL، i18n) |
-| [ACCESS-MODEL.md](docs/ACCESS-MODEL.md) | مدل دسترسی و تعرفهٔ پاس‌ها |
-| [AUDIT.md](docs/AUDIT.md) | گزارش ممیزی کامل + نتایج QA |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | استقرار (Cloudflare) |
+| [FRONTEND.md](docs/FRONTEND.md) | راهنمای توسعه‌دهندهٔ کلاینت |
 
 ## 🔒 امنیت
 
-امنیت اولویت اول، دوم و سوم این پلتفرم است:
-
-1. **احراز هویت بدون رمز** — پیام امضا‌شده با nonce یک‌بارمصرف (replay-impossible)، سشن HMAC با مقایسه timing-safe
-2. **تأیید پرداخت روی زنجیره** — سرور خودش رسید تراکنش را از RPC رسمی Abstract می‌گیرد و Transfer event را پارس می‌کند؛ کلاینت فقط هش تراکنش را می‌فرستد (txHash یکتا = ضد replay، from = کیف متصل = ضد سرقت اعتبار)
+1. **احراز هویت بدون رمز و بدون DB** — nonce خودامضاشده (HMAC، TTL و binding داخل خود nonce) + پیام امضا‌شده + سشن HMAC با مقایسه timing-safe
+2. **تأیید پرداخت روی زنجیره** — سرور خودش رسید تراکنش را از RPC رسمی Abstract می‌گیرد؛ کلاینت فقط هش می‌فرستد؛ انقضای پاس از **timestamp خود بلاک** محاسبه می‌شود (replay یک تراکنش قدیمی هرگز پاس آینده نمی‌سازد)
 3. **اعتبارسنجی ورودی** — همه ورودی‌های API با zod
-4. **Rate limiting** — روی همه endpoint ها
+4. **Rate limiting** — روی همه endpoint ها (restore محدودتر چون RPC-سنگین است)
 5. **Zero client trust** — هیچ تصمیم امنیتی سمت کلاینت نیست
-
-جزئیات کامل: [`docs/SECURITY.md`](docs/SECURITY.md) — گزارش ممیزی دورهٔ اخیر: [`docs/AUDIT.md`](docs/AUDIT.md)
 
 ## ☁️ استقرار روی Cloudflare (رایگان، بدون کارت اعتباری)
 
 راهنمای کامل: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 
-خلاصه: Cloudflare Workers + D1 + OpenNext adapter. طرح رایگان Workers (۱۰۰k درخواست/روز) + D1 (۵GB) برای این پروژه کاملاً کافی است.
+خلاصه: Cloudflare Workers + OpenNext adapter — **بدون D1 و بدون هیچ binding دیتابیسی**. طرح رایگان Workers (۱۰۰k درخواست/روز) کاملاً کافی است.
 
 ## 📝 ثبت در Abstract Portal
 
-برای نمایش در [portal.abs.xyz](https://portal.abs.xyz):
-
-1. اپ را deploy کنید و دامنه HTTPS آماده کنید
-2. در Portal یک اپ جدید بسازید (Get Listed)
-3. اطلاعات: نام، توضیح، لوگو (ماسکات پنگوئن)، دسته‌بندی (Trading/Analytics)، URL
-4. برای دسترسی به Grant های Abstract، از [مستندات builders](https://abs.xyz) پیروی کنید
+برای نمایش در [portal.abs.xyz](https://portal.abs.xyz): اپ را deploy کنید، در Portal یک اپ جدید بسازید (Get Listed) و اطلاعات (نام، لوگوی پنگوئن، دسته Trading/Analytics، URL) را وارد کنید.
 
 ## 📄 مجوز
 

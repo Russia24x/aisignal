@@ -1,24 +1,24 @@
 /**
  * Access entitlements — answers "what can this user see right now?"
  *
- * Access model (v2 — session-key-free, see docs/ACCESS-MODEL.md):
- *  - FREE (any registered wallet): entry, live market, track record,
- *    consensus teaser, dashboard — everything EXCEPT signal content
- *  - Access passes (PASS_1D / PASS_7D / PASS_30D / PASS_365D /
- *    PASS_LIFETIME): unlock the full daily signal for their duration
+ * v4 STATELESS: entitlements live INSIDE the HMAC-signed session as an `ent`
+ * claim (minted only after on-chain payment verification). No database,
+ * no lookups — checking access is pure cryptography + clock comparison.
  *
- * All grants stack: a new pass extends from the later of (now, current
- * expiry), so users never lose paid days by renewing early.
+ * Access model (target plan §1, §8–§10):
+ *  - FREE (any signed-in wallet): entry, live market, track record,
+ *    consensus teaser, dashboard — everything EXCEPT signal content
+ *  - Access passes (PASS_1D … PASS_LIFETIME): unlock the full multi-
+ *    timeframe signal for their duration
+ *
+ * Recovery after cookies are cleared: the chain is the source of truth —
+ * see lib/modules/access/restore.ts (eth_getLogs treasury scan).
  *
  * @module lib/modules/access/entitlements
  */
-import { db } from "@/lib/db";
-import {
-  ACCESS_PASSES,
-  isLifetimePass,
-  LIFETIME_GRANT_DAYS,
-  type EntitlementsDTO,
-} from "./passes";
+import type { EntitlementClaim, SessionPayload } from "@/lib/security/session";
+import type { EntitlementsDTO } from "./passes";
+import { ACCESS_PASSES, isLifetimePass, LIFETIME_GRANT_DAYS, DAY_MS } from "./passes";
 
 export type Entitlements = EntitlementsDTO;
 
@@ -33,45 +33,37 @@ function anonymous(): Entitlements {
   };
 }
 
-export async function getEntitlements(userId: string | null): Promise<Entitlements> {
-  if (!userId) return anonymous();
-  const user = await db.user.findUnique({ where: { id: userId } });
-  if (!user) return anonymous();
-
-  const now = new Date();
-  const grant = await db.accessGrant.findFirst({
-    where: { userId, expiresAt: { gt: now } },
-    orderBy: { expiresAt: "desc" },
-  });
-
-  const daysLeft = grant
-    ? Math.max(
-        0,
-        Math.ceil((grant.expiresAt.getTime() - now.getTime()) / (24 * 3600 * 1000)),
-      )
+/** Derive entitlements from a session payload (pure — no I/O). */
+export function entitlementsFromSession(session: SessionPayload | null): Entitlements {
+  if (!session) return anonymous();
+  const ent = session.ent ?? null;
+  const active = ent !== null && (ent.lifetime || ent.expiresAt > Date.now());
+  const daysLeft = ent
+    ? Math.max(0, Math.ceil((ent.expiresAt - Date.now()) / DAY_MS))
     : 0;
-
   return {
     authenticated: true,
-    address: user.address,
-    // free tier since v2: registration IS entry — browsing is free,
+    address: session.addr,
+    // free tier: registration IS entry — browsing is free,
     // signal content is what passes unlock
     platformAccess: true,
-    signalAccess: grant !== null,
-    activeGrant: grant
-      ? {
-          product: grant.product,
-          expiresAt: grant.expiresAt.toISOString(),
-          lifetime: isLifetimePass(grant.product) || daysLeft >= LIFETIME_GRANT_DAYS - 366,
-        }
-      : null,
+    signalAccess: active,
+    activeGrant:
+      ent && active
+        ? {
+            product: ent.product,
+            expiresAt: new Date(ent.expiresAt).toISOString(),
+            lifetime: ent.lifetime || isLifetimePass(ent.product) || daysLeft >= LIFETIME_GRANT_DAYS - 366,
+            txHash: ent.txHash,
+          }
+        : null,
     subscriptionDaysLeft: daysLeft,
   };
 }
 
-/** UTC day key for signals (e.g. "2026-06-30"). */
-export function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+/** The current session's entitlement claim (raw, for expiry-aware callers). */
+export function currentClaim(session: SessionPayload | null): EntitlementClaim | null {
+  return session?.ent ?? null;
 }
 
 export interface ProductInfo {

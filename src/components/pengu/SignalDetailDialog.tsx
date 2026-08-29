@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 interface Detail {
   day: string;
   action: string;
+  band: string;
   score: number;
   confidence: number;
   dataQuality: number;
@@ -45,8 +46,6 @@ interface Detail {
   riskReward: number | null;
   expectedRangeLow: number | null;
   expectedRangeHigh: number | null;
-  support: number | null;
-  resistance: number | null;
   atr: number | null;
   factors: { key: string; score: number; weight: number; contribution: number }[];
   reasoning: { fa: string; en: string };
@@ -160,16 +159,15 @@ export function SignalDetailDialog({ day, onClose }: { day: string | null; onClo
                 {/* verdict + confidence */}
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/50 bg-muted/20 px-4 py-3">
                   <div>
-                    <div className="text-[10px] font-medium text-muted-foreground">{t("signal.compositeScore")}</div>
+                    <div className="text-[10px] font-medium text-muted-foreground">{t("signal.signalScore")}</div>
                     <div
                       dir="ltr"
                       className={cn(
                         "font-mono text-2xl font-black",
-                        detail.score > 0 ? "text-buy" : detail.score < 0 ? "text-sell" : "text-hold",
+                        detail.score > 55 ? "text-buy" : detail.score < 45 ? "text-sell" : "text-hold",
                       )}
                     >
-                      {detail.score > 0 ? "+" : ""}
-                      {detail.score.toFixed(1)}
+                      {Math.round(detail.score)}<span className="text-sm text-muted-foreground">/100</span>
                     </div>
                   </div>
                   <div className="min-w-40 flex-1">
@@ -227,8 +225,6 @@ export function SignalDetailDialog({ day, onClose }: { day: string | null; onClo
                   <Level label={t("signal.stopLoss")} value={fmt.price(detail.stopLoss)} danger />
                   <Level label={t("signal.takeProfit1")} value={fmt.price(detail.takeProfit1)} good />
                   <Level label={t("signal.takeProfit2")} value={fmt.price(detail.takeProfit2)} good />
-                  <Level label={t("signal.support")} value={fmt.price(detail.support)} />
-                  <Level label={t("signal.resistance")} value={fmt.price(detail.resistance)} />
                   <Level
                     label={t("signal.expectedRange")}
                     value={

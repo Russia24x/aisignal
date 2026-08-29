@@ -1,166 +1,193 @@
-# مرجع کامل API — PenguSignals
+# مرجع کامل API — PenguSignals (v4 Stateless)
 
 همهٔ endpointها زیر `/api` و نسبت به ریشهٔ اپ هستند. همهٔ پاسخ‌ها JSON با فیلد `ok` (boolean) هستند؛ خطاها کد پایدارِ string در `error` برمی‌گردانند.
 
 - 🔓 **عمومی** — بدون احراز هویت
-- 🔑 **سشن** — نیازمند کوکی `pengu_session` معتبر
+- 🔑 **سشن** — نیازمند کوکی `pengu_session` معتبر یا `Authorization: Bearer <token>`
 - 💳 **پاس** — نیازمند پاس دسترسی فعال (در غیر این صورت 402)
 
 سقف rate limit برای هر IP (پنجرهٔ لغزان، پاسخ 429 + `retry-after`):
 
-| bucket | حد/دقیقه |
+| bucket | حد |
 |---|---|
-| auth | 30 |
-| payment | 10 |
-| signal | 30 |
-| public | 120 |
+| auth | 30/دقیقه |
+| payment | 10/دقیقه |
+| signal | 30/دقیقه |
+| public | 120/دقیقه |
+| restore | 6/5دقیقه |
 
 ---
 
 ## احراز هویت
 
 ### `GET /api/auth/nonce?address=0x…` — 🔓 (auth)
-صدور nonce یک‌بارمصرف + **پیام کامل امضا** (ساخته‌شده توسط سرور).
+صدور nonce خودامضاشده (stateless) + **پیام کامل امضا** (ساخته‌شده توسط سرور).
 
-- پارامتر: `address` (آدرس معتبر checksummed یا lowercase)
+- پارامتر: `address` (آدرس معتبر)
 - پاسخ 200:
 ```json
-{ "ok": true, "nonce": "hex32", "message": "PenguSignals wants you to sign in…\nNonce: …", "issuedAt": "ISO", "expiresInMs": 300000 }
+{ "ok": true, "nonce": "v1<random48hex><tsHex><hmac64hex>", "message": "PenguSignals wants you to sign in…\nNonce: …", "issuedAt": "ISO", "expiresInMs": 600000 }
 ```
 - خطاها: `INVALID_ADDRESS` (400)، `RATE_LIMITED` (429)
 
 ### `POST /api/auth/verify` — 🔓 (auth)
-تبدیل امضا به سشن.
+تبدیل امضا به سشن (شکل رسمی SIWE).
 
-- بدنه:
-```json
-{ "address": "0x…", "nonce": "…", "issuedAt": "ISO", "signature": "0x…" }
-```
-- پاسخ 200: `{ ok: true, entitlements: Entitlements }` + `set-cookie: pengu_session` (httpOnly)
-- خطاها: `NONCE_INVALID` / `NONCE_EXPIRED` / `NONCE_MISMATCH` / `BAD_ISSUED_AT` / `BAD_SIGNATURE` / `VERIFICATION_FAILED` / `NONCE_REPLAY` / `INVALID_ADDRESS` (400)
-- سمت کلاینت کدها به این خطاهای بومی‌سازی‌شده نگاشت می‌شوند: `RATE_LIMITED` / `SIGNATURE_REJECTED` / `POPUP_BLOCKED` / `TIMEOUT` / `SIGNATURE_FAILED` / `NETWORK`
+- بدنه: `{ "message": "<exact EIP-4361>", "signature": "0x…" }`
+- پاسخ 200: `{ ok: true, user: { address }, sessionToken }` + `set-cookie: pengu_session`
+  (`sessionToken` همان توکن امضاشده است — برای iframeها در localStorage نگه داشته و به‌صورت Bearer ارسال می‌شود)
+- خطاها: `INVALID_MESSAGE` / `INVALID_ADDRESS` / `INVALID_CHAIN` / `INVALID_DOMAIN` / `MESSAGE_EXPIRED` / `BAD_ISSUED_AT` / `NONCE_INVALID` / `NONCE_REPLAY` / `BAD_SIGNATURE` / `VERIFICATION_FAILED` (401)
 
 ### `GET /api/auth/session` — 🔓 (public)
-وضعیت سشن فعلی.
+سشن فعلی + entitlements (از claim داخل سشن — بدون DB) + `sessionMode` (cookie|bearer|null برای عیب‌یابی).
 
-- پاسخ 200: `{ ok: true, entitlements: Entitlements }` (بدون سشن → همهٔ فیلدها خاموش/تهی)
-
-### `DELETE /api/auth/session` — 🔓 (auth)
-خروج (پاک‌کردن کوکی‌ها).
-
-- پاسخ: `{ ok: true }`
-
-### شکل `Entitlements`
-```json
-{
-  "authenticated": true,
-  "address": "0x…",
-  "platformAccess": false,
-  "signalAccess": true,
-  "activeGrant": { "product": "PASS_30D", "expiresAt": "ISO" },
-  "subscriptionDaysLeft": 27,
-  "memberSince": "ISO", "paymentsCount": 3, "lifetime": false
-}
-```
+### `DELETE /api/auth/session` — 🔑 (auth)
+خروج (پاک‌کردن کوکی؛ توکن Bearer سمت کلاینت پاک می‌شود).
 
 ---
 
-## پرداخت
+## بازیابی اشتراک از زنجیره
 
-### `POST /api/payment/verify` — 🔑 (payment)
-راستی‌آزمایی تراکنش روی زنجیره و اعتباردهی پاس. کلاینت **فقط هش** می‌فرستد.
+### `POST /api/access/restore` — 🔑 (restore)
+اسکن `eth_getLogs` چانکی (۴۰۰ روز اخیر) برای پرداخت‌های ERC-20 کاربر به خزانه؛ بازپخش زمانی با semantics انباشته؛ مینت بهترین entitlement داخل سشن جدید (فقط اگر بهتر از فعلی باشد).
 
-- بدنه:
-```json
-{ "txHash": "0x…64hex…", "product": "PASS_7D" }
-```
-- `product` یکی از: `PASS_1D` / `PASS_7D` / `PASS_30D` / `PASS_365D` / `PASS_LIFETIME`
-- پاسخ 200: `{ ok: true, amountToken: 63, txHash: "0x…", entitlements: Entitlements }`
-- خطاها:
-  - 400: `INVALID_BODY` / `INVALID_TX_HASH` / `UNKNOWN_PRODUCT` / `TX_FAILED` / `NO_QUALIFYING_TRANSFER`
-  - 401: `UNAUTHORIZED`
-  - 404: `TX_NOT_FOUND` (تراکنش روی Abstract ناموجود)
-  - 202: `TX_PENDING` (شناخته‌شده ولی هنوز ماین نشده — بعداً دوباره)
-  - 409-مانند: `TX_ALREADY_USED` (replay)
-- منطق کامل ۷-مرحله‌ای: `docs/SECURITY.md §3`
-
----
-
-## سیگنال‌ها
-
-### `GET /api/signal/today` — 💳 (signal)
-سیگنال کامل امروز (اکشن، ورود، حد ضرر، اهداف، استدلال).
-
-- پاسخ 200: `{ ok: true, signal: SignalDTO }`
-- 401 بدون سشن؛ 402 با `{ error: "NEED_ACCESS_PASS" }` برای سشن بدون پاس
-
-### `GET /api/signal/preview` — 🔓 (signal)
-پیش‌نمایش اجماع اندیکاتورها **بدون محتوای سیگنال** (`action: null` + ماسک).
-
-### `GET /api/signal/history?limit=30` — 🔓 (signal)
-سابقهٔ سیگنال‌های **گذشته** (شرط `day < today` — سیگنال امروز هرگز در سابقه نیست) + آمار WIN/LOSS.
+- پاسخ 200: `{ ok, restored: boolean, entitlements, sessionToken?, paymentsFound: number }`
+- خطاها: `UNAUTHORIZED` (401)، `SCAN_FAILED` (502)، `RATE_LIMITED` (429)
+- نکته: تراکنش‌های native ETH لاگ ندارند → ETH فقط با verify هش دستی بازیابی می‌شود
 
 ---
 
 ## بازار
 
 ### `GET /api/market/overview` — 🔓 (public)
-اسنپ‌شات زنده (قیمت/۲۴ساعت/حجم/نقدینگی/FDV از DexScreener با cache 60s + cross-check CoinGecko هر ۱۰ مرتبه) + خلاصهٔ سیگنال امروز (ماسک‌شده) + وضعیت هشدارهای قیمت.
-
----
-
-## داشبورد کاربر
-
-### `GET /api/me/dashboard` — 🔑 (public bucket)
-اطلاعات داشبورد: عضویت، پرداخت‌ها، وضعیت پاس، آلارم‌ها.
-
----
-
-## هشدار قیمت
-
-- `GET /api/alerts` — 🔑 فهرست هشدارهای کاربر
-- `POST /api/alerts/create` — 🔑 ساخت هشدار `{ direction: "above"|"below", target: number }`
-- `DELETE /api/alerts/{id}` — 🔑 حذف (فقط مالک)
-
----
-
-## پروفایل Abstract (Portal)
-
-### `GET /api/user-profile/{address}` — 🔓 (public)
-پروفایل پرتال Abstract (tier، نشان‌ها، آواتار) — با ۵ دقیقه fetch cache و graceful degradation (پروفایل ندارد → `profile: null`).
-
----
-
-## OG (اسکرین‌شات اجتماعی)
-
-### `GET /api/og` — 🔓
-تصویر OG داینامیک.
-
----
-
-## مدل داده (Prisma — `prisma/schema.prisma`)
-
-| مدل | نقش | فیلدهای کلیدی |
-|---|---|---|
-| `User` | هویت | `address` (unique, lowercase) |
-| `Nonce` | nonceهای احراز هویت | `nonce` (unique), `address?`, `expiresAt`, `usedAt` |
-| `AuthSession` | ردپای ورودها | `userId`, `ipHash`, `createdAt` |
-| `Payment` | پرداخت‌های تأییدشده | `txHash` (unique), `amountRaw/amountToken`, `product`, `status`, `blockNumber` |
-| `AccessGrant` | دسترسی زمان‌محور | `userId`, `product`, `startsAt`, `expiresAt`, `sourcePaymentId` |
-| `Signal` | سیگنال روزانه | `day` (unique, UTC), `action`, `confidence`, `score`, `entry/SL/TP`, `indicatorsJson`, `outcome` |
-| `EngineSnapshot` | snapshot ورودی موتور | برای ممیزی‌پذیری بازتولید سیگنال |
-| `PriceAlert` | هشدار قیمت | `userId`, `direction`, `target`, `active` |
-
-قواعد:
-- یک سیگنال در روز (`day` unique) — idempotent
-- اعتبار پاس = وجود `AccessGrant` با `expiresAt > now` (پاس‌ها انباشته می‌شوند از `max(now, انقضای فعلی)`)
-- `PASS_LIFETIME` = grant ۳۶,۵۰۰ روزه
-
----
-
-## خطاها — قرارداد عمومی
+snapshot زنده + کندل‌های روزانه/ساعتی + آمار track record.
 
 ```json
-{ "ok": false, "error": "STABLE_CODE", "retryAfterMs": 42000 }
+{
+  "ok": true,
+  "snapshot": { "priceUsd": 0.009006, "change24h": -4.4, "change5m": null, "change1h": 0.29,
+                "volume24hUsd": 9966292, "liquidityUsd": 442538, "fdvUsd": null, "marketCapUsd": 565691124,
+                "source": "binance", "fetchedAt": 1788000000000 },
+  "daily": [Candle…120],
+  "hourly": [Candle…48],
+  "trackRecord": { "total": 304, "closed": 304, "wins": 149, "losses": 155, "winRate": 49, "avgConfidence": 49.9 },
+  "chain": { "id": 2741, "name": "Abstract", "explorer": "https://abscan.org" },
+  "token": { "symbol": "PENGU", "address": "0x9ebe…" }
+}
 ```
-کدها در UI به پیام‌های بومی‌سازی‌شده (fa/en) نگاشت می‌شوند؛ مقدار خام هرگز مستقیم به کاربر نشان داده نمی‌شود (fallback: خود کد).
+
+---
+
+## سیگنال
+
+### `GET /api/signal/preview` — 🔓 (signal)
+پیش‌نمایش رایگان: اجماع فاکتورها + نقطه‌های تایم‌فریم (بدون امتیاز/سطوح/استدلال).
+
+```json
+{ "ok": true, "day": "2026-08-29", "action": null, "confidence": null,
+  "consensus": { "bullish": 5, "bearish": 5, "neutral": 0, "total": 10 },
+  "timeframes": [ { "timeframe": "15m", "action": "WAIT" }, … { "timeframe": "1d", "action": "BUY" } ],
+  "indicatorsCount": 5, "dataQuality": 1, "candlesUsed": 210 }
+```
+
+### `GET /api/signal/today` — 💳 (signal)
+محصول پولی: سیگنال زندهٔ چند-تایم‌فریمی کامل.
+
+```json
+{
+  "ok": true, "day": "2026-08-29",
+  "signal": {
+    "action": "BUY", "band": "BUY", "score": 78.5, "confidence": 71,
+    "price": 0.009006, "dataQuality": 1, "volatilityWarning": false,
+    "timeframes": {
+      "15m": { "score": 52.1, "action": "WAIT", "band": "WAIT", "confidence": 33, "atrPct": 0.42, "candlesUsed": 200 },
+      "1h":  { … }, "4h": { … }, "1d": { "score": 88.3, "action": "BUY", … }
+    },
+    "entryLow": 0.00891, "entryHigh": 0.00905, "stopLoss": 0.0082,
+    "takeProfit1": 0.0101, "takeProfit2": 0.0112, "riskReward": 1.5,
+    "expectedRangeLow": 0.0085, "expectedRangeHigh": 0.0095,
+    "factors": [ { "key": "trend", "score": 0.81, "weight": 30, "contribution": 24.3 }, … ],
+    "reasoning": { "fa": "…", "en": "…" }
+  },
+  "entitlements": Entitlements
+}
+```
+- خطاها: `UNAUTHORIZED` (401)، `PAYMENT_REQUIRED` (402)، `INSUFFICIENT_HISTORY` (503)
+
+### `GET /api/signal/history?limit=30&offset=0` — 🔓 (public)
+Track record عمومی — **بازمحاسبه قطعی از کندل‌های عمومی** (بدون امروز).
+
+- آیتم: `{ day, action, band, confidence, score (0-100), priceAtSignal, outcome (WIN|LOSS), outcomePrice, priceChangePct, correct }`
+- `stats` روی کل تاریخچه است؛ `curve` منحنی تجمعی بازده استراتژی
+
+### `GET /api/signal/detail?day=YYYY-MM-DD` — 🔓 (public)
+دریل‌داون یک روز گذشته: امتیاز + سطوح + فاکتورها + نتیجه. `day >= today` → 403 `TODAY_PAYWALLED`.
+
+---
+
+## پرداخت
+
+### `GET /api/payment/config` — 🔓 (public)
+توکن‌های پرداخت + کاتالوگ + **کوت‌های امضاشده** برای توکن‌های غیر PENGU.
+
+```json
+{
+  "ok": true,
+  "chain": { "id": 2741, … },
+  "token": { "symbol": "PENGU", "address": "0x9ebe…", "decimals": 18 },
+  "tokens": [ { "key": "PENGU", "kind": "erc20", … }, { "key": "ETH", "kind": "native", … } ],
+  "treasury": "0x60df…",
+  "products": { "PASS_1D": { "pricePengu": 10, "days": 1 }, "PASS_7D": { "pricePengu": 50 }, … },
+  "quotes": { "PASS_1D": { "ETH": { "amountToken": 0.000037, "quote": { product, token, amountToken, quotedAt, sig } } } }
+}
+```
+
+### `POST /api/payment/verify` — 🔑 (payment)
+تأیید پرداخت روی زنجیره + مینت entitlement داخل سشن.
+
+- بدنه: `{ "txHash": "0x…", "product": "PASS_…", "quote?" }` — quote برای توکن‌های غیر PENGU الزامی است
+- پاسخ 200: `{ ok: true, amountToken, token, entitlements, sessionToken }`
+- خطاها: `INVALID_TX_HASH` / `UNKNOWN_PRODUCT` / `QUOTE_REQUIRED` / `QUOTE_INVALID` / `INSUFFICIENT_AMOUNT` / `UNSUPPORTED_TOKEN` / `NO_QUALIFYING_TRANSFER` (400)، `TX_PENDING` (202)، `TX_NOT_FOUND` (404)، `TX_FAILED`
+- **انقضا از timestamp بلاک** محاسبه می‌شود → replay تراکنش قدیمی پاس منقضی می‌دهد
+
+### `GET /api/payment/history` — 🔑 (payment)
+پرداخت‌های on-chain (اسکن سبک ۴۵ روز اخیر؛ فقط ERC-20 — تراکنش native ETH لاگ ندارد).
+
+---
+
+## داشبورد
+
+### `GET /api/me/dashboard` — 🔑 (signal)
+خلاصهٔ کاربر از سشن + اسکن سبک زنجیره: `entitlements`, `activeGrant` (با نوار پیشرفت), `payments` (۵ مورد اخیر), `memberSince` (زمان صدور سشن — بدون رکورد حساب), `paymentsCount`, `totalSpentPengu`.
+
+---
+
+## سایر
+
+### `GET /api` — 🔓
+سلامت سرویس.
+
+### `GET /api/agw/details` — 🔓
+پروکسی جزئیات AGW provider (کش ۱ ساعته؛ خارج از مسیر بحرانی).
+
+### `GET /api/user-profile/[address]` — 🔓 (public)
+پروفایل پرتال Abstract (پروکسی کش‌شده).
+
+### `GET /api/og` — 🔓
+کارت OG استاتیک (SVG، کش ۱ ساعته).
+
+---
+
+## مدل‌های مشترک
+
+```ts
+interface Entitlements {
+  authenticated: boolean; address: string | null;
+  platformAccess: boolean;          // ≡ authenticated (لایه رایگان)
+  signalAccess: boolean;            // پاس فعال
+  activeGrant: { product: string; expiresAt: string; lifetime: boolean; txHash?: string } | null;
+  subscriptionDaysLeft: number;
+}
+```
+
+هشدار قیمت: **بدون API** — کاملاً کلاینت‌ساید (localStorage).

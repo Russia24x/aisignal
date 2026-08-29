@@ -1,14 +1,17 @@
 "use client";
 
 /**
- * PaymentDialog — pay a product price in PENGU (ERC-20 transfer) and have
- * the server verify it on-chain.
+ * PaymentDialog — pay a product price in PENGU (ERC-20) or ETH (native) and
+ * have the server verify it on-chain (target plan §7 — generic token registry).
  *
  * Steps (all user-visible):
- *  1. summary: product, price, treasury, wallet PENGU balance
- *  2. "Pay from wallet" → ERC-20 `transfer(treasury, amount)` via wagmi
+ *  1. summary: product, price, token selector, treasury, wallet balances
+ *  2. "Pay from wallet" →
+ *       PENGU: ERC-20 `transfer(treasury, amount)` via wagmi
+ *       ETH  : native `sendTransaction` with the SIGNED QUOTE amount
  *  3. after the tx hash exists (receipt pending is fine) it is auto-filled
- *  4. "Verify & activate" → POST /api/payment/verify (server-side RPC check)
+ *  4. "Verify & activate" → POST /api/payment/verify (server-side RPC check;
+ *     non-PENGU payments include the signed quote)
  *  5. success → session refresh (entitlements update reactively)
  *
  * Security: the client never claims anything — it only submits a tx hash;
@@ -17,8 +20,8 @@
  * @module components/pengu/PaymentDialog
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { erc20Abi, parseUnits } from "viem";
+import { useAccount, useBalance, useWriteContract, useSendTransaction, useWaitForTransactionReceipt } from "wagmi";
+import { erc20Abi, parseUnits, formatUnits } from "viem";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import { useAuth } from "./useAuth";
 import { authFetch } from "@/lib/client-session";
@@ -43,6 +46,12 @@ interface Props {
 }
 
 type Phase = "idle" | "sending" | "sent" | "verifying" | "success";
+type TokenKey = "PENGU" | "ETH";
+
+interface PaymentConfig {
+  tokens: { key: TokenKey; kind: "erc20" | "native"; address: string | null; decimals: number; symbol: string }[];
+  quotes: Record<string, Record<string, { amountToken: number; quote: unknown }>>;
+}
 
 /** Classify a failed wallet send (AGW popup semantics + RPC errors). */
 function classifySendError(err: unknown): string {
@@ -79,6 +88,25 @@ export function PaymentDialog({ product, onClose }: Props) {
   // "already paid" path: reveal the manual tx-hash input without sending
   // from this browser (e.g. the user transferred from the Abstract Portal).
   const [showManual, setShowManual] = useState(false);
+  // token selector (target plan §7) — PENGU default, ETH optional
+  const [tokenKey, setTokenKey] = useState<TokenKey>("PENGU");
+  const [config, setConfig] = useState<PaymentConfig | null>(null);
+
+  // fetch payment config (token registry + signed quotes) when a product opens
+  useEffect(() => {
+    if (!product) return;
+    setTokenKey("PENGU");
+    setConfig(null);
+    fetch("/api/payment/config")
+      .then((r) => r.json())
+      .then((d) => setConfig(d.ok ? d : null))
+      .catch(() => setConfig(null));
+  }, [product]);
+
+  const ethQuote = useMemo(() => {
+    if (!product || !config) return null;
+    return config.quotes?.[product.id]?.ETH ?? null;
+  }, [product, config]);
 
   const { data: penguBalance } = useBalance({
     address,
@@ -86,9 +114,8 @@ export function PaymentDialog({ product, onClose }: Props) {
     chainId: publicConfig.chainId,
   });
 
-  // Native ETH balance — plain ERC-20 transfers are NOT gas-sponsored on
-  // Abstract (only the AGW account deployment is), so the user needs a
-  // little ETH for the transfer to succeed. Official FAQ: docs.abs.xyz.
+  // Native ETH balance — used for payment (native path) AND gas (ERC-20 path):
+  // plain ERC-20 transfers are NOT gas-sponsored on Abstract.
   const { data: ethBalance } = useBalance({
     address,
     chainId: publicConfig.chainId,
@@ -96,49 +123,72 @@ export function PaymentDialog({ product, onClose }: Props) {
   const lowGas = ethBalance !== undefined && ethBalance.value <= 0n;
 
   const { writeContractAsync } = useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
   const receipt = useWaitForTransactionReceipt({
     hash: (txHash || undefined) as `0x${string}` | undefined,
     chainId: publicConfig.chainId,
     query: { enabled: !!txHash },
   });
 
-  const balanceOk = useMemo(
-    () => !penguBalance || !product || penguBalance.value >= parseUnits(String(product.pricePengu), 18),
-    [penguBalance, product],
-  );
+  // required amount for the selected token
+  const required = useMemo(() => {
+    if (!product) return null;
+    if (tokenKey === "PENGU") return { amount: product.pricePengu, symbol: "PENGU" };
+    if (ethQuote) return { amount: ethQuote.amountToken, symbol: "ETH" };
+    return null;
+  }, [product, tokenKey, ethQuote]);
 
-  /** Trigger the ERC-20 transfer from the connected wallet. */
+  const activeBalance = tokenKey === "PENGU" ? penguBalance?.value : ethBalance?.value;
+  const balanceOk = useMemo(() => {
+    if (!required || activeBalance === undefined) return true;
+    const decimals = tokenKey === "PENGU" ? 18 : 18;
+    return activeBalance >= parseUnits(String(required.amount), decimals);
+  }, [activeBalance, required, tokenKey]);
+
+  /** Trigger the payment from the connected wallet (ERC-20 or native). */
   const pay = useCallback(async () => {
-    if (!product) return;
+    if (!product || !required) return;
     setPhase("sending");
     setError(null);
     try {
-      const hash = await writeContractAsync({
-        address: publicConfig.penguToken,
-        abi: erc20Abi,
-        functionName: "transfer",
-        args: [publicConfig.treasury, parseUnits(String(product.pricePengu), 18)],
-        chainId: publicConfig.chainId,
-      });
+      let hash: `0x${string}`;
+      if (tokenKey === "PENGU") {
+        hash = await writeContractAsync({
+          address: publicConfig.penguToken,
+          abi: erc20Abi,
+          functionName: "transfer",
+          args: [publicConfig.treasury, parseUnits(String(product.pricePengu), 18)],
+          chainId: publicConfig.chainId,
+        });
+      } else {
+        if (!ethQuote) throw new Error("NO_ETH_QUOTE");
+        hash = await sendTransactionAsync({
+          to: publicConfig.treasury,
+          value: parseUnits(String(ethQuote.amountToken), 18),
+          chainId: publicConfig.chainId,
+        });
+      }
       setTxHash(hash);
       setPhase("sent");
     } catch (err) {
       setPhase("idle");
       setError(classifySendError(err));
     }
-  }, [product, writeContractAsync]);
+  }, [product, required, tokenKey, ethQuote, writeContractAsync, sendTransactionAsync]);
 
-  /** Ask the server to verify the tx and grant access. */
+  /** Ask the server to verify the tx and mint the entitlement. */
   const verify = useCallback(
     async (hash: string) => {
       if (!product || !hash) return;
       setPhase("verifying");
       setError(null);
       try {
+        const body: Record<string, unknown> = { txHash: hash, product: product.id };
+        if (tokenKey !== "PENGU" && ethQuote) body.quote = ethQuote.quote;
         const res = await authFetch("/api/payment/verify", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ txHash: hash, product: product.id }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         if (data.ok) {
@@ -157,7 +207,7 @@ export function PaymentDialog({ product, onClose }: Props) {
         setError("NETWORK");
       }
     },
-    [product, refresh, txHash],
+    [product, refresh, txHash, tokenKey, ethQuote],
   );
 
   /**
@@ -183,6 +233,10 @@ export function PaymentDialog({ product, onClose }: Props) {
 
   if (!product) return null;
 
+  const tokens: TokenKey[] = (config?.tokens ?? [{ key: "PENGU" } as { key: TokenKey }])
+    .map((x) => x.key)
+    .filter((k) => k === "PENGU" || k === "ETH");
+
   return (
     <Dialog open={!!product} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="glass-card max-w-md border-border/70 sm:max-w-lg" dir="auto">
@@ -204,16 +258,54 @@ export function PaymentDialog({ product, onClose }: Props) {
               <Row
                 label={t("payment.amount")}
                 value={
-                  <span className="font-mono font-black text-primary">
-                    {product.pricePengu} PENGU
-                  </span>
+                  required ? (
+                    <span className="font-mono font-black text-primary" dir="ltr">
+                      {required.amount} {required.symbol}
+                    </span>
+                  ) : (
+                    <span className="font-mono font-black text-primary">{product.pricePengu} PENGU</span>
+                  )
                 }
               />
+              {/* token selector (plan §7) */}
+              {tokens.length > 1 && phase === "idle" && (
+                <Row
+                  label={t("payment.payWith")}
+                  value={
+                    <span className="inline-flex overflow-hidden rounded-lg border border-border/60" role="group">
+                      {tokens.map((k) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setTokenKey(k)}
+                          disabled={k === "ETH" && !ethQuote}
+                          className={cn(
+                            "px-3 py-1 text-xs font-bold transition-colors",
+                            tokenKey === k
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-transparent text-muted-foreground hover:bg-muted",
+                            k === "ETH" && !ethQuote && "cursor-not-allowed opacity-40",
+                          )}
+                        >
+                          {k === "PENGU" ? "PENGU" : "ETH"}
+                        </button>
+                      ))}
+                    </span>
+                  }
+                />
+              )}
+              {tokenKey === "ETH" && ethQuote && (
+                <p className="text-[10px] leading-5 text-muted-foreground">
+                  ≈ {product.pricePengu} PENGU · {t("payment.quoteNote")}
+                </p>
+              )}
               <Row
                 label={t("payment.balance")}
                 value={
                   <span className={cn("font-mono text-sm", balanceOk ? "text-buy" : "text-sell")}>
-                    {formatPengu(penguBalance?.value)} PENGU
+                    {tokenKey === "PENGU"
+                      ? `${formatPengu(penguBalance?.value)} PENGU`
+                      : `${formatEth(ethBalance?.value)} ETH`}
                     {!balanceOk && ` — ${t("payment.insufficient")}`}
                   </span>
                 }
@@ -253,7 +345,7 @@ export function PaymentDialog({ product, onClose }: Props) {
             {/* step 1: pay */}
             <Button
               onClick={pay}
-              disabled={phase === "sending" || phase === "sent" || !balanceOk}
+              disabled={phase === "sending" || phase === "sent" || !balanceOk || !required}
               className="w-full gap-2 text-base font-bold"
               size="lg"
             >
@@ -265,7 +357,7 @@ export function PaymentDialog({ product, onClose }: Props) {
               ) : (
                 <>
                   <Wallet className="size-5" />
-                  {t("payment.payNow")} — {product.pricePengu} PENGU
+                  {t("payment.payNow")} — {required ? `${required.amount} ${required.symbol}` : `${product.pricePengu} PENGU`}
                 </>
               )}
             </Button>
@@ -299,6 +391,9 @@ export function PaymentDialog({ product, onClose }: Props) {
                   placeholder={t("payment.txHashPlaceholder")}
                   className="font-mono text-xs"
                 />
+                {tokenKey === "ETH" && (
+                  <p className="text-[10px] text-muted-foreground">{t("payment.manualPenguOnly")}</p>
+                )}
                 <Button
                   onClick={() => verify(manualHash)}
                   disabled={!manualHash}

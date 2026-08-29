@@ -1,5 +1,5 @@
 /**
- * GET /api/signal/today — the paid product.
+ * GET /api/signal/today — the paid product (live multi-timeframe signal).
  *
  * Requires:
  *  1. valid session (wallet signature auth)
@@ -7,13 +7,15 @@
  *
  * Content protection: signal details are NEVER sent to clients without an
  * active pass. Non-entitled users get a 402 + use the free /api/signal/preview
- * teaser (consensus counts only, no action/levels/reasoning).
+ * teaser (consensus counts + timeframe dots only, no scores/levels/reasoning).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/security/rate-limit";
 import { getSession } from "@/lib/security/session";
-import { getEntitlements } from "@/lib/modules/access/entitlements";
-import { getOrCreateTodaySignal } from "@/lib/modules/analysis/signal-service";
+import { entitlementsFromSession } from "@/lib/modules/access/entitlements";
+import { getCurrentSignal, todayKey } from "@/lib/modules/analysis/signal-service";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const limited = guard(req, "signal");
@@ -24,23 +26,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "UNAUTHORIZED", need: "AUTH" }, { status: 401 });
   }
 
-  const ent = await getEntitlements(session.sub);
+  const ent = entitlementsFromSession(session);
   if (!ent.signalAccess) {
     return NextResponse.json({ ok: false, error: "PAYMENT_REQUIRED", need: "ACCESS_PASS" }, { status: 402 });
   }
 
   try {
-    const { engine, day, createdAt } = await getOrCreateTodaySignal();
+    const engine = await getCurrentSignal();
     return NextResponse.json({
       ok: true,
-      day,
-      createdAt: createdAt.toISOString(),
+      day: todayKey(),
+      createdAt: new Date(engine.generatedAt).toISOString(),
       signal: {
         action: engine.action,
+        band: engine.band,
         score: engine.score,
         confidence: engine.confidence,
         dataQuality: engine.dataQuality,
         price: engine.price,
+        timeframes: engine.timeframes,
         entryLow: engine.entryLow,
         entryHigh: engine.entryHigh,
         stopLoss: engine.stopLoss,
@@ -49,13 +53,11 @@ export async function GET(req: NextRequest) {
         riskReward: engine.riskReward,
         expectedRangeLow: engine.expectedRangeLow,
         expectedRangeHigh: engine.expectedRangeHigh,
-        support: engine.support,
-        resistance: engine.resistance,
-        atr: engine.atr,
+        volatilityWarning: engine.volatilityWarning,
         volatility: engine.volatility,
-        factors: engine.factors,
+        factors: engine.timeframes["4h"].factors,
         reasoning: engine.reasoning,
-        candlesUsed: engine.candlesUsed,
+        candlesUsed: engine.timeframes["4h"].candlesUsed,
       },
       entitlements: ent,
     });

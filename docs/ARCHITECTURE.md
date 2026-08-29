@@ -1,4 +1,4 @@
-# معماری PenguSignals
+# معماری PenguSignals — v4 Stateless
 
 این سند نقشه کامل سیستم برای توسعه‌دهندگان است. مستندات تکمیلی:
 
@@ -8,145 +8,146 @@
 | `API.md` | مرجع کامل endpointها + مدل داده |
 | `WALLET-AND-TRANSACTIONS.md` | اتصال کیف پول/امضا/تراکنش — مبتنی بر مستندات رسمی Abstract |
 | `TECH-STACK.md` | فناوری‌ها، نسخه‌ها و دلیل انتخاب |
+| `ACCESS-MODEL.md` | مدل دسترسی، تعرفه و معماری بدون دیتابیس |
 | `BACKEND.md` / `FRONTEND.md` | راهنمای توسعه‌دهندهٔ سرور و کلاینت |
-| `ACCESS-MODEL.md` | مدل دسترسی و تعرفه |
 | `AUDIT.md` | گزارش ممیزی کامل + نتایج QA |
 | `DEPLOYMENT.md` | استقرار |
 
-## اصول طراحی
+## اصول طراحی (v4 — هم‌راستا با معماری هدف)
 
-1. **هیچ چیز هاردکد نیست** — همه پارامترها (آدرس‌ها، قیمت‌ها، وزن‌ها، TTLها، rate limitها) از environment می‌آیند (`src/lib/config.ts` + `src/lib/public-config.ts`)
-2. **صفر اعتماد به کلاینت** — هر ادعایی (امضا، پرداخت) سمت سرور راستی‌آزمایی می‌شود
-3. **داده‌محور** — همه اعداد نمایش‌داده‌شده از محاسبه واقعی روی داده زنده می‌آیند؛ هیچ دیتای نمایشی وجود ندارد
-4. **ماژولار** — هر دامنه (بازار/تحلیل/دسترسی) یک ماژول مستقل با اینترفیس روشن است
-5. **قابل ممیزی** — سیگنال هر روز با snapshot کامل اندیکاتورها در DB ذخیره می‌شود
+1. **هیچ داده‌ای ذخیره نمی‌شود** — هیچ دیتابیسی (نه SQL، نه D1، نه KV)؛ فقط کش‌های in-memory با TTL کوتاه
+2. **هیچ چیز هاردکد نیست** — همه پارامترها (آدرس‌ها، قیمت‌ها، وزن‌ها، TTLها، rate limitها) از environment می‌آیند (`src/lib/config.ts`)
+3. **صفر اعتماد به کلاینت** — هر ادعایی (امضا، پرداخت) سمت سرور راستی‌آزمایی می‌شود
+4. **داده‌محور** — همه اعداد نمایش‌داده‌شده از محاسبه واقعی روی داده زنده می‌آیند
+5. **بازتولیدپذیر** — موتور تحلیل قطعی (deterministic) است؛ هر سیگنال تاریخی از کندل‌های عمومی قابل بازمحاسبه و راستی‌آزمایی است
+6. **زنجیره = دیتابیس** — منبع حقیقت برای مالکیت پاس، خود زنجیره است (§9 معماری هدف)
 
 ## جریان‌های اصلی
 
-### ۱. اتصال کیف پول و احراز هویت (SIWE)
-
-جزئیات کامل رفتار popup AGW، خطاها و عیب‌یابی: `WALLET-AND-TRANSACTIONS.md`.
+### ۱. اتصال کیف پول و احراز هویت (SIWE بدون دیتابیس)
 
 ```
 کلاینت                        سرور                          زنجیره
   │ GET /api/auth/nonce         │
-  │ ─────────────────────────►  │ تولید nonce یک‌بارمصرف (TTL ۵ دقیقه)
-  │ ◄─── {nonce, message} ───── │ + پیام امضا (domain-bound)
+  │ ─────────────────────────►  │ nonce خودامضاشده:
+  │                             │   v1<random48><ts-hex><hmac64>
+  │                             │   (HMAC ← SESSION_SECRET؛ TTL و
+  │ ◄─── {nonce, message} ───── │    binding آدرس داخل خود nonce)
   │                             │
-  │ [کاربر پیام را با AGW/EOA امضا می‌کند]
+  │ [کاربر پیام EIP-4361 را با AGW/EOA امضا می‌کند]
   │                             │
-  │ POST /api/auth/verify       │
-  │ ─────────────────────────►  │ ۱. اعتبارسنجی nonce (ناموجود/مصرف‌شده/منقضی؟)
-  │   {address, nonce,          │ ۲. بررسی issuedAt (±۱۰ دقیقه)
-  │    issuedAt, signature}     │ ۳. verifyMessage (EOA یا EIP-1271 برای AGW) ────►
-  │ ◄─── set-cookie session ─── │ ۴. burn nonce  ۵. upsert User  ۶. کوکی HMAC
+  │ POST /api/auth/verify       │ ۱. parse + validate (viem/siwe)
+  │ ─────────────────────────►  │ ۲. chainId / domain / expiry
+  │   {message, signature}      │ ۳. تأیید HMAC nonce (issuance + TTL + binding)
+  │                             │ ۴. verifySiweMessage ──────────► EIP-1271 (AGW)
+  │ ◄─── set-cookie session ─── │ ۵. burn nonce (حافظه‌ای، best-effort)
+  │      + sessionToken         │ ۶. سشن HMAC: {sub=wallet, ent?}
 ```
 
-سشن: `base64url(payload).base64url(HMAC-SHA256(payload))` — httpOnly, sameSite=lax, secure در production. اعتبارسنجی با مقایسه timing-safe.
+سشن: `base64url(payload).base64url(HMAC-SHA256(payload))` — httpOnly, sameSite تطبیقی + همان توکن به‌عنوان Bearer برای iframeها. **Identity = خود آدرس کیف پول** (sub == addr) — بدون جدول User.
 
-### ۲. موتور تحلیل
+### ۲. موتور تحلیل چند-تایم‌فریمی (۵ فاکتور × ۴ تایم‌فریم)
 
-**داده ورودی:**
-- Snapshot زنده از DexScreener (عمیق‌ترین استخر PENGU روی Abstract)
-- کندل روزانه ۹۰ روزه + ساعتی ۴۸ ساعته از Binance (fallback: CoinGecko)
+**داده ورودی:** کندل‌های Binance (fallback: CoinGecko) برای 15m/1h/4h/1d با کش per-TF (30s/60s/120s/120s — §13 معماری هدف) + snapshot زنده (Binance ticker غنی‌شده با DexScreener).
 
-**پایپ‌لاین:**
+**پایپ‌لاین هر تایم‌فریم:**
 
 ```
-Candles (90d) ──► ۱۱ ارزیاب مستقل ──► score ∈ [-1,+1] برای هرکدام
-                                            │
-                    وزن‌دهی (مجموع ۱۰۰) ─────┤
-                                            ▼
-                                  امتیاز مرکب ∈ [-100,+100]
-                                            │
-                     ┌──────────────────────┼──────────────────────┐
-                     ▼                      ▼                      ▼
-               score ≥ +20            -20 < score < +20       score ≤ -20
-                  BUY                     HOLD                   SELL
-                     │                      │                      │
-                     └──────────────┬───────┴──────────────────────┘
-                                    ▼
-                     سطوح ریسک (ATR×1.2 SL / ×1.8 TP1 / ×3.0 TP2)
-                     + اطمینان (قدرت امتیاز × توافق اندیکاتورها × کیفیت داده)
-                     + استدلال دوزبانه تولیدشده از اعداد واقعی
+Candles(TF) ──► ۵ ارزیاب مستقل ──► score ∈ [-1,+1] برای هرکدام
+                                        │
+              وزن‌دهی (مجموع ۱۰۰) ──────┤   Trend EMA20/50   30
+                                        │   Momentum (ATR-norm) 25
+                                        ▼   MACD (ATR-norm)  20
+                              امتیاز TF ∈ [0,100]  (50=بی‌طرف)
+                                        │             RSI 14        15
+                              ┌─────────┴─────────┐  Volume         10
+                              ▼                   ▼
+                        score ≥ 75           score < 25
+                           BUY                  SELL     (باقی: WAIT)
 ```
 
-**ارزیاب‌ها و وزن‌ها** (`src/lib/modules/analysis/signals.ts`):
+**سیگنال اصلی:** ترکیب وزن‌دار تایم‌فریم‌ها (1d: 0.35 ، 4h: 0.35 ، 1h: 0.20 ، 15m: 0.10) → score اصلی ۰-۱۰۰ → BUY/SELL/WAIT + بند پنج‌سطحی داخلی (BUY/WATCH/WAIT/WEAK/SELL — §4 معماری هدف).
 
-| ارزیاب | وزن | منطق |
-|---|---|---|
-| emaTrend | ۱۴ | فاصله EMA9/EMA21 + موقعیت قیمت نسبت به EMA21 |
-| rsi | ۱۴ | نواحی اشباع فروش/خرید با نگاشت پیوسته + جهت RSI |
-| macd | ۱۴ | هیستوگرام نرمال‌شده + تشدید/تضعیف |
-| smaStructure | ۱۰ |golden/death cross + ساختار قیمت |
-| bollinger | ۱۰ | موقعیت %B + تشخیص squeeze (کاهش اتکا) |
-| stochastic | ۹ | نواحی + کراس %K/%D |
-| obv | ۸ | شیب OBV + واگرایی با قیمت |
-| srLevels | ۸ | موقعیت در کانال حمایت-مقاومت |
-| vwap | ۷ | فاصله از VWAP غلتان (کاهش در فواصل افراطی) |
-| momentum | ۷ | ROC(10) + شیب رگرسیون خطی |
-| volume | ۷ | تأیید حرکت قیمت توسط حجم |
+**نرمال‌سازی ATR:** مومنتوم و MACD نسبت به ATR نرمال می‌شوند تا «۳ ATR حرکت» روی همه تایم‌فریم‌ها معنای یکسان داشته باشد.
 
-**قطعیت (Determinism):** با داده یکسان، خروجی یکسان است — سیگنال هر روز یک بار در DB ذخیره و بین همه کاربران پولی مشترک است (انصاف + ممیزی).
+**اطمینان:** قدرت امتیاز + توافق تایم‌فریم‌ها + توافق فاکتورها × کیفیت داده — با جریمه وقتی ATR روزانه بالاست (⚠ «نوسانات بالا» — §16).
 
-### ۳. تأیید پرداخت روی زنجیره
+**سطوح ریسک:** مبتنی بر ATR ساعتی-۴ (1.2 ATR حد ضرر / 1.8 و 3.0 ATR اهداف).
+
+**زبان انسانی (§15):** استدلال دوزبانه از اعداد واقعی تولید می‌شود — «گرایش خرید» نه «قیمت قطعاً بالا می‌رود».
+
+### ۳. تأیید پرداخت روی زنجیره + entitlement داخل سشن
 
 ```
 کلاینت                        سرور                          RPC Abstract
-  │ [ERC-20 transfer(treasury, amount)]
-  │ ────────────────────────────────────────────────────────►
+  │ [transfer PENGU یا sendETH به خزانه]
   │ ◄── txHash ──────────────────────────────────────────────
   │                             │
-  │ POST /api/payment/verify    │
-  │ ─────────────────────────►  │ getTransactionReceipt ─────►
-  │   {txHash, product}         │ ◄─── receipt + logs ────────
-  │                             │ بررسی‌ها:
-  │                             │  • status == success
-  │                             │  • Transfer(PENGU → treasury)
+  │ POST /api/payment/verify    │ getTransactionReceipt ─────►
+  │   {txHash, product,         │ بررسی‌ها:
+  │    quote? (توکن غیر PENGU)} │  • status == success
+  │                             │  • Transfer(توکن → خزانه) یا tx.value≥کوت
   │                             │  • from == کیف سشن کاربر
-  │                             │  • amount ≥ قیمت محصول
-  │                             │  • txHash قبلاً استفاده نشده (یکتا در DB)
-  │ ◄── {ok, entitlements} ──── │ ایجاد Payment + AccessGrant (atomic)
+  │                             │  • amount ≥ قیمت (کوت امضاشده برای ETH)
+  │ ◄── سشن جدید (ent مینت‌شده) │  • انقضا = timestamp بلاک + مدت پلن
 ```
 
-**محصولات و دسترسی:**
-- پاس‌های دسترسی v3 (بدون Session Key — جزئیات: `ACCESS-MODEL.md`)، مبنای ۱۰ پنگو/روز
-  با تخفیف پلکانی ۰/۱۰/۲۰/۳۰٪ (سقف ۳۰٪):
-  `PASS_1D` (۱۰ پنگو)، `PASS_7D` (۶۳)، `PASS_30D` (۲۴۰)،
-  `PASS_365D` (۲,۵۵۵)، `PASS_LIFETIME` (۵,۱۱۰ = 2× سالانه) — همه grant تمدیدشونده
-  (از انتهای پاس فعلی یا اکنون). ورود و مرور رایگان است؛ فقط محتوای سیگنال
-  نیاز به پاس فعال دارد. منبع واحد: `src/lib/modules/access/passes.ts`
+**انقضای صادقانه:** پاس از **timestamp بلاک** محاسبه می‌شود نه زمان verify — replay تراکنش قدیمی هرگز پاس آینده نمی‌سازد (§10). پشتیبانی stacking: `max(انقضای فعلی, blockTime) + مدت`.
 
-**دیالوگ پرداخت (v3):** فازها idle → sending → sent → (رسید زنجیره → تأیید خودکار) → verifying → success؛
-به‌علاوهٔ مسیر دستی «قبلاً پرداخت کرده‌اید؟» برای هش پرداخت‌شده از کیف پول دیگر.
-خطاها همگی کد پایدار دارند (rejected / popup_blocked / timeout / insufficient_balance /
-TX_NOT_FOUND / TX_PENDING / TX_FAILED / TX_ALREADY_USED / NO_QUALIFYING_TRANSFER) و به
-پیام بومی‌سازی‌شده (fa/en) نگاشت می‌شوند. دیاگرام کامل: `FRONTEND.md`.
+### ۴. بازیابی از زنجیره (زنجیره = دیتابیس — §9)
 
-### ۴. ارزیابی عملکرد (Track Record)
+وقتی کاربر با مرورگر جدید برمی‌گردد:
 
-هر سیگنال بعد از ۲۴ ساعت (در اولین درخواست history) با قیمت لحظه‌ای مقایسه و علامت‌گذاری می‌شود:
-- BUY: درست اگر قیمت بالا رفته باشد
-- SELL: درست اگر قیمت پایین رفته باشد
-- HOLD: درست اگر تغییر < ۳٪ باشد
+```
+POST /api/access/restore
+        │
+        ▼
+eth_getLogs (چانکی، 400 روز اخیر):
+  Transfer(token ∈ registry, from=کیف کاربر, to=خزانه)
+        │
+        ▼
+نگاشت مبلغ → بزرگ‌ترین پلن قابل خرید (passForAmount)
+        │
+        ▼
+بازپخش زمانی با semantics انباشته: exp = max(exp, blockTime) + days
+        │
+        ▼
+مینت بهترین entitlement داخل سشن جدید
+```
 
-## دیتابیس (Prisma / SQLite)
+- اسکن per-wallet کش می‌شود (۱۰ دقیقه) و restore با rate-limit محدود است
+- تراکنش‌های native ETH لاگ ندارند → بازیابی ETH فقط از مسیر دستی txHash (که به‌خاطر انقضای block-timestamp ضد replay است)
+- ورود (signIn) بعد از هر لاگین یکبار restore را در پس‌زمینه صدا می‌زند
 
-| مدل | نقش |
-|---|---|
-| `User` | هویت کیف‌محور + وضعیت platformAccess |
-| `Nonce` | nonce های یک‌بارمصرف احراز هویت |
-| `AuthSession` | سوابق نشست (زیرساخت لغو نشست) |
-| `Payment` | تراکنش‌های تأییدشده (txHash یکتا = ضد replay) |
-| `AccessGrant` | دسترسی‌های زمان‌دار |
-| `Signal` | سیگنال روزانه + snapshot کامل + نتیجه |
-| `EngineSnapshot` | وزن‌های موتور در هر روز (ممیزی تاریخی) |
+### ۵. سابقه و Track Record — بازمحاسبه قطعی
 
-## کش و کارایی
+بدون DB، تاریخچه از کندل‌های روزانه عمومی (Binance، ۳۶۵ کندل) بازتولید می‌شود:
 
-- `TTLCache` با stale-while-revalidate: snapshot (۶۰ث) و history (۱۵دقیقه)
-- فقط ۲-۳ فراخوانی upstream در هر بازه کش؛ محافظت از rate limit های عمومی
-- react-query سمت کلاینت با staleTime ۶۰ ثانیه
+- **تعریف قطعی:** سیگنال «برای روز D» = تحلیل ۵ فاکتوری روی کندل‌های *قبل از* D (پایان D-1)؛ نتیجه = مقایسه close(D) با close(D-1)
+- هر روز گذشته با همان موتور زنده امتیاز می‌گیرد؛ WIN/LOSS تعریف می‌شود (BUY: Δ>0 ، SELL: Δ<0 ، WAIT: |Δ|<3٪)
+- منحنی equity = جمع ساده بازده استراتژی (BUY→+Δ ، SELL→−Δ ، WAIT→0)
+- **قوت کلیدی:** هرکسی می‌تواند صحت سابقه را با داده عمومی راستی‌آزمایی کند — قوی‌تر از یک DB خصوصی
+- سیگنال امروز (محصول پولی) هرگز از endpointهای عمومی نشت نمی‌کند (`day >= today` → 403)
+
+### ۶. هشدار قیمت — کاملاً کلاینت
+
+هشدارها در localStorage (via `useSyncExternalStore` — الگوی رسمی React) ذخیره و در برابر قیمت polled ارزیابی می‌شوند؛ toast + chime محلی. صفر سرور.
+
+## کش و کارایی (§13)
+
+| کش | TTL | اشتراک |
+|---|---|---|
+| snapshot بازار | 60s | همه کاربران |
+| کندل 15m | 30s | همه |
+| کندل 1h | 60s | همه |
+| کندل 4h | 120s | همه |
+| کندل 1d | 120s | همه |
+| سری روزانه ۳۶۵تایی (تاریخچه) | 15m | همه |
+| سیگنال مرکب زنده | 30s (کوتاه‌ترین TF) | همه کاربران پولی — یکسان در پنجره کش (انصاف بدون DB) |
+| اسکن restore | 10m | per-wallet |
+| rate-limit buckets | پنجره لغزان | per-IP per-isolate |
+
+پس ۱۰۰۰ کاربر الزاماً ۱۰۰۰ درخواست upstream ایجاد نمی‌کنند.
 
 ## افزودن زبان جدید
 
@@ -154,15 +155,13 @@ TX_NOT_FOUND / TX_PENDING / TX_FAILED / TX_ALREADY_USED / NO_QUALIFYING_TRANSFER
 2. در `src/components/i18n/I18nProvider.tsx` دیکشنری را import و به `dictionaries` اضافه کنید
 3. کد زبان را در `NEXT_PUBLIC_SUPPORTED_LOCALES` اضافه کنید
 
-## افزودن اندیکاتور جدید
+## افزودن توکن پرداخت جدید
 
-1. در `indicators.ts` تابع ریاضی خالص بنویسید
-2. در `signals.ts` یک ارزیاب بسازید که `FactorResult` برمی‌گرداند (score ∈ [-1,1]، weight)
-3. به `computeFactors` اضافه کنید — وزن‌ها خودکار نرمال می‌شوند
-4. برچسب دوزبانه در `FACTOR_LABELS` (SignalSection.tsx) و توضیح در `describeFactor` (engine.ts)
+1. در `src/lib/modules/access/tokens.ts` تعریف کنید (آدرس + decimals + `enabled`)
+2. آدرس را با RPC (symbol/decimals) تأیید کنید
+3. برای توکن‌های ERC-20 به‌طور خودکار در اسکن restore ظاهر می‌شود؛ برای کوت‌های غیر-PENGU نرخ تبدیل در `/api/payment/config` اضافه کنید
 
 ## پایش و لاگ
 
-- لاگ JSON ساختاریافته با scope (scope:market:dexscreener و…)
-- warning های خودکار: واگرایی قیمت بین منابع، شکست fallback
-- متریک‌ها: `generationMs` در جدول Signal
+- لاگ JSON ساختاریافته با scope (scope:market:binance و…)
+- warning های خودکار: واگرایی قیمت بین منابع، شکست fallback، ATR بالا

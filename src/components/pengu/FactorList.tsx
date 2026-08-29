@@ -24,17 +24,11 @@ export interface Factor {
 }
 
 export const FACTOR_LABELS: Record<string, { fa: string; en: string }> = {
-  emaTrend: { fa: "روند EMA (9/21)", en: "EMA trend (9/21)" },
-  smaStructure: { fa: "ساختار SMA (20/50)", en: "SMA structure (20/50)" },
-  rsi: { fa: "RSI (14)", en: "RSI (14)" },
+  trend: { fa: "روند EMA (20/50)", en: "EMA trend (20/50)" },
+  momentum: { fa: "مومنتوم (ATR-norm)", en: "Momentum (ATR-norm)" },
   macd: { fa: "MACD (12/26/9)", en: "MACD (12/26/9)" },
-  bollinger: { fa: "باندهای بولینگر", en: "Bollinger Bands" },
-  stochastic: { fa: "استوکاستیک (14/3)", en: "Stochastic (14/3)" },
-  obv: { fa: "جریان حجم (OBV)", en: "Volume flow (OBV)" },
-  vwap: { fa: "VWAP", en: "VWAP" },
-  momentum: { fa: "مومنتوم و شیب", en: "Momentum & slope" },
+  rsi: { fa: "RSI (14)", en: "RSI (14)" },
   volume: { fa: "رژیم حجم", en: "Volume regime" },
-  srLevels: { fa: "حمایت/مقاومت", en: "Support/Resistance" },
 };
 
 export function FactorList({ factors, className }: { factors: Factor[]; className?: string }) {

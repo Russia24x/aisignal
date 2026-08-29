@@ -2,6 +2,10 @@
   // Cloudflare Workers config for PenguSignals (free tier — no credit card).
   // Full step-by-step guide: docs/DEPLOYMENT.md
   // Docs: https://opennext.js.org/cloudflare
+  //
+  // v4 STATELESS: no D1 binding — nothing is persisted. Market data is
+  // fetched live and cached in memory; entitlements live in signed
+  // sessions; history is recomputed deterministically from public candles.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "pengu-signals",
   "main": ".open-next/worker.js",
@@ -15,17 +19,6 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
-  "d1_databases": [
-    {
-      // Free SQLite database (5GB, 5M row reads/day). Consumed by
-      // src/lib/db.ts via @prisma/adapter-d1.
-      // Create yours:  npx wrangler d1 create pengu-signals
-      // Then paste the printed database_id below.
-      "binding": "DB",
-      "database_name": "pengu-signals",
-      "database_id": "PASTE_YOUR_D1_DATABASE_ID_HERE"
-    }
-  ],
   // Non-secret runtime config. SESSION_SECRET is NOT here — set it with:
   //   npx wrangler secret put SESSION_SECRET
   "vars": {
@@ -35,10 +28,20 @@
     "MARKET_CACHE_TTL_MS": "60000",
     "HISTORY_CACHE_TTL_MS": "900000",
     "DATA_FETCH_TIMEOUT_MS": "15000",
+    "SIGNAL_TF_TTL_15M_MS": "30000",
+    "SIGNAL_TF_TTL_1H_MS": "60000",
+    "SIGNAL_TF_TTL_4H_MS": "120000",
+    "SIGNAL_TF_TTL_1D_MS": "120000",
+    "PAYMENT_QUOTE_TTL_MS": "1800000",
+    "PAYMENT_SLIPPAGE_PCT": "3",
+    "RESTORE_SCAN_LOOKBACK_DAYS": "400",
+    "RESTORE_SCAN_CHUNK_BLOCKS": "4000000",
+    "RESTORE_CACHE_TTL_MS": "600000",
     "RATE_LIMIT_AUTH": "30/60000",
     "RATE_LIMIT_PAYMENT": "10/60000",
     "RATE_LIMIT_SIGNAL": "30/60000",
     "RATE_LIMIT_PUBLIC": "120/60000",
+    "RATE_LIMIT_RESTORE": "6/300000",
     "SESSION_TTL_HOURS": "168",
     "NEXT_PUBLIC_CHAIN_ID": "2741",
     "NEXT_PUBLIC_RPC_URL": "https://api.mainnet.abs.xyz",

@@ -269,6 +269,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return fail("NETWORK");
         }
         setState((s) => ({ ...s, signingIn: false, error: null }));
+
+        // v4 stateless recovery: log-in is the natural moment to reconcile
+        // the session with the CHAIN (payments are the source of truth). If
+        // the scan finds a better entitlement it re-mints the session — done
+        // in the background so the sign-in never waits on the RPC scan.
+        void (async () => {
+          try {
+            const res = await authFetch("/api/access/restore", { method: "POST" });
+            const data = await res.json();
+            if (data.ok && data.restored) {
+              if (data.sessionToken) saveSessionToken(data.sessionToken);
+              log.debug("entitlement restored from chain after sign-in");
+              await refresh();
+            }
+          } catch {
+            /* restore is best-effort — the dashboard button retries it */
+          }
+        })();
         return { ok: true };
       } catch (err) {
         return fail(classifyError(err));

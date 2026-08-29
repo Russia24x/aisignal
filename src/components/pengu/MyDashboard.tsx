@@ -46,6 +46,7 @@ import {
   CheckCircle2,
   Coins,
   Copy,
+  DatabaseBackup,
   ExternalLink,
   Fuel,
   History,
@@ -74,7 +75,7 @@ interface DashboardActiveGrant {
 
 interface DashboardPayment {
   txHash: string;
-  product: string;
+  product: string | null;
   amountToken: number;
   status: string;
   verifiedAt: string;
@@ -115,7 +116,8 @@ function shortTx(h: string): string {
   return `${h.slice(0, 6)}…${h.slice(-4)}`;
 }
 
-function productLabel(t: (k: string) => string, product: string): string {
+function productLabel(t: (k: string) => string, product: string | null): string {
+  if (!product) return "—";
   const key = PRODUCT_LABEL_KEY[product];
   return key ? t(key) : product;
 }
@@ -183,7 +185,7 @@ function useStateWithTimeout(ms = 1600): [boolean, (v: boolean) => void] {
 export function MyDashboard() {
   const { t, locale } = useI18n();
   const queryClient = useQueryClient();
-  const { entitlements, loading: authLoading } = useAuth();
+  const { entitlements, loading: authLoading, refresh } = useAuth();
 
   const enabled = !!entitlements?.authenticated;
 
@@ -199,6 +201,35 @@ export function MyDashboard() {
     staleTime: 30_000,
     retry: 1,
   });
+
+  // ── restore purchases from the chain (v4 stateless recovery) ─────────────
+  // The chain is the source of truth: a chunked eth_getLogs scan rebuilds the
+  // best entitlement and re-mints it into the session.
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
+  const restore = useCallback(async () => {
+    setRestoring(true);
+    setRestoreMsg(null);
+    try {
+      const res = await authFetch("/api/access/restore", { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        setRestoreMsg(data.restored ? "restored" : "nothingNew");
+        if (data.restored) {
+          await refresh();
+          queryClient.invalidateQueries({ queryKey: ["me-dashboard"] });
+          queryClient.invalidateQueries({ queryKey: ["signal-today"] });
+        }
+      } else {
+        setRestoreMsg("failed");
+      }
+    } catch {
+      setRestoreMsg("failed");
+    } finally {
+      setRestoring(false);
+      setTimeout(() => setRestoreMsg(null), 4000);
+    }
+  }, [refresh, queryClient]);
 
   const profileQuery = useAbstractProfile();
   const portalProfile = profileQuery.data ?? null;
@@ -228,6 +259,34 @@ export function MyDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* restore purchases from the chain (stateless recovery) */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={restore}
+              disabled={restoring}
+              aria-label={t("dashboard.restore")}
+              title={t("dashboard.restoreHint")}
+            >
+              {restoring ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <DatabaseBackup className="size-3.5" />
+              )}
+              <span className="hidden sm:inline">{t("dashboard.restore")}</span>
+            </Button>
+            {restoreMsg && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "px-2 py-0.5 text-[10px] font-bold",
+                  restoreMsg === "restored" ? "text-buy" : "text-muted-foreground",
+                )}
+              >
+                {t(`dashboard.restore_${restoreMsg}`)}
+              </Badge>
+            )}
             {address && (
               <TooltipProvider delayDuration={250}>
                 <Tooltip>

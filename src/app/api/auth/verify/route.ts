@@ -4,17 +4,17 @@
  *   (https://build.abs.xyz/docs/authentication/siwe-button)
  *
  * Verifies the EIP-4361 message + wallet signature (EOA or EIP-1271 smart
- * wallet like AGW) via the official `verifySiweMessage` chain, creates the
- * user if needed, establishes the session.
+ * wallet like AGW) via the official `verifySiweMessage` chain and
+ * establishes the session.
  *
- * Response includes the signed session TOKEN alongside the httpOnly cookie:
- * cookie-blocked contexts (cross-site iframe previews) keep it in
- * localStorage and send it as `Authorization: Bearer` — see
+ * v4 STATELESS: there is no user table — the wallet address IS the identity
+ * (session.sub). The response includes the signed session TOKEN alongside
+ * the httpOnly cookie: cookie-blocked contexts (cross-site iframe previews)
+ * keep it in localStorage and send it as `Authorization: Bearer` — see
  * lib/client-session.ts.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
 import { guard } from "@/lib/security/rate-limit";
 import { verifyAuth } from "@/lib/security/siwe";
 import { establishSession } from "@/lib/security/session";
@@ -52,18 +52,12 @@ export async function POST(req: NextRequest) {
   }
 
   const address = result.address!;
-  const user = await db.user.upsert({
-    where: { address },
-    update: { loginCount: { increment: 1 }, lastLoginAt: new Date() },
-    create: { address },
-  });
-
-  const { token } = await establishSession(user.id, address);
-  log.info("user authenticated", { userId: user.id, address });
+  const { token } = await establishSession(address);
+  log.info("wallet authenticated", { address });
 
   return NextResponse.json({
     ok: true,
-    user: { id: user.id, address },
+    user: { address },
     // Same signed token as the httpOnly cookie — for iframe-embedded
     // clients where cookies are blocked (standard SIWE+token pattern).
     sessionToken: token,

@@ -18,10 +18,16 @@
  *     transparently supports EIP-1271 contract signatures (Abstract Global
  *     Wallet is a smart account) — burns the nonce and creates a session.
  *
- * Hardening on top of the official reference implementation:
- *  - nonces are persisted in the DB (single-use + TTL + optional address
- *    pre-binding) instead of a session cookie → survives isolates, works
- *    with D1 on Cloudflare Workers;
+ * v4 STATELESS nonces (no database): the nonce is SELF-AUTHENTICATING —
+ * `v1.<random>.<issuedAtMs>.<hmac(random|issuedAt|address)>`. Only this
+ * server can mint one (HMAC over SESSION_SECRET), the TTL is embedded, and
+ * optional address pre-binding is inside the MAC. Single-use enforcement
+ * uses a per-isolate in-memory burn set: best-effort replay protection
+ * (see SECURITY.md for the honest threat-model discussion — the signed
+ * message is also domain-, chain- and time-bound, which keeps the residual
+ * replay window both tiny and low-value).
+ *
+ * Hardening kept from v3:
  *  - the signed message is prepared SERVER-side (the official demo builds it
  *    client-side), so a malicious client cannot tamper with the statement,
  *    domain, URI or chainId it signs;
@@ -31,7 +37,7 @@
  *
  * @module lib/security/siwe
  */
-import { createHash } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import {
   createPublicClient,
   http,
@@ -45,14 +51,12 @@ import {
   validateSiweMessage,
 } from "viem/siwe";
 import type { PublicClient } from "viem";
-import { db } from "@/lib/db";
 import { serverConfig, publicConfig } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("auth:siwe");
 
-/** How long a prepared sign-in message stays valid (official demo: 7 days —
- *  we tighten to 10 minutes; the SESSION itself has its own 7-day TTL). */
+/** How long a prepared sign-in message stays valid. */
 const MESSAGE_TTL_MS = 10 * 60 * 1000;
 /** Sanity ceiling for a message expirationTime (guards far-future clocks). */
 const MAX_MESSAGE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -85,20 +89,82 @@ function allowedDomains(extraHost?: string | null): Set<string> {
   return hosts;
 }
 
-/** Issue a single-use, official-format nonce (optionally address-bound). */
-export async function issueNonce(address?: string): Promise<{ nonce: string }> {
-  // housekeeping: drop expired nonces occasionally
-  await db.nonce.deleteMany({ where: { expiresAt: { lt: new Date() } } });
-  const nonce = generateSiweNonce(); // official viem/siwe generator
-  await db.nonce.create({
-    data: {
-      nonce,
-      address: address?.toLowerCase() ?? null,
-      expiresAt: new Date(Date.now() + MESSAGE_TTL_MS),
-    },
-  });
-  return { nonce };
+/* ------------------------------------------------------------------ */
+/* Stateless, self-authenticating nonces                               */
+/* ------------------------------------------------------------------ */
+
+function mac(data: string): string {
+  return createHmac("sha256", serverConfig.SESSION_SECRET).update(data).digest("base64url");
 }
+
+/**
+ * Mint a nonce: `v1 + <random48hex> + <issuedAtHex> + <hmac64hex>`.
+ * Fully ALPHANUMERIC — the EIP-4361 ABNF requires `nonce = 8*ALPHANUM`,
+ * so no separators or base64url characters are allowed. The MAC covers
+ * random|issuedAt|address, proving server issuance, embedded TTL and
+ * address pre-binding with zero storage.
+ */
+export function issueNonce(address?: string): { nonce: string } {
+  const random = randomBytes(24).toString("hex"); // 48 chars
+  const issuedAt = Date.now();
+  const bind = address?.toLowerCase() ?? "";
+  const sig = Buffer.from(mac(`${random}.${issuedAt}.${bind}`), "base64url").toString("hex"); // 64 chars
+  return { nonce: `v1${random}${issuedAt.toString(16)}${sig}` };
+}
+
+interface NonceTicket {
+  issuedAt: number;
+}
+
+const HEX_RE = /^[0-9a-f]+$/;
+
+/**
+ * Parse & verify a self-authenticating nonce against the claiming address.
+ * Returns null when the MAC is wrong (not minted by us / wrong binding),
+ * the TTL has passed, or the clock skews.
+ */
+function verifyNonceTicket(nonce: string, claimAddress: string): NonceTicket | null {
+  if (!nonce.startsWith("v1") || nonce.length <= 2 + 48 + 64) return null;
+  const body = nonce.slice(2);
+  const random = body.slice(0, 48);
+  const sig = body.slice(-64);
+  const tsHex = body.slice(48, -64);
+  if (!HEX_RE.test(random) || !HEX_RE.test(sig) || !HEX_RE.test(tsHex)) return null;
+  const issuedAt = parseInt(tsHex, 16);
+  if (!Number.isFinite(issuedAt)) return null;
+  // binding: the MAC input used the address the nonce was minted for — a
+  // nonce pre-bound to wallet A cannot be replayed inside a message from wallet B
+  const sigBuf = Buffer.from(sig, "hex").toString("base64url");
+  const expected = mac(`${random}.${issuedAt}.${claimAddress.toLowerCase()}`);
+  const expectedUnbound = mac(`${random}.${issuedAt}.`);
+  if (sigBuf !== expected && sigBuf !== expectedUnbound) return null;
+  if (Date.now() - issuedAt > MESSAGE_TTL_MS) return null; // expired
+  if (Date.now() < issuedAt - 5 * 60 * 1000) return null; // clock skew
+  return { issuedAt };
+}
+
+/* ------------------------------------------------------------------ */
+/* Burn set (best-effort single-use, per isolate)                      */
+/* ------------------------------------------------------------------ */
+
+const spentNonces = new Map<string, number>();
+
+function burnNonce(nonce: string): boolean {
+  const now = Date.now();
+  // prune expired entries occasionally
+  if (spentNonces.size > 5000) {
+    for (const [k, t] of spentNonces) {
+      if (now - t > MESSAGE_TTL_MS * 2) spentNonces.delete(k);
+    }
+  }
+  if (spentNonces.has(nonce)) return false; // replay
+  spentNonces.set(nonce, now);
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Message construction & verification                                 */
+/* ------------------------------------------------------------------ */
 
 /**
  * Build the exact EIP-4361 message the user must sign, using the official
@@ -135,7 +201,7 @@ export interface VerifyResult {
 /**
  * Verify a signed SIWE payload — the official verification chain
  * (parse → validate structure → validate fields → verifySiweMessage with
- * EIP-1271) plus our DB nonce hardening.
+ * EIP-1271) plus our stateless nonce hardening.
  *
  * @param params.message    the exact EIP-4361 string the wallet signed
  * @param params.signature  0x-prefixed hex signature
@@ -181,13 +247,10 @@ export async function verifyAuth(params: {
     return { ok: false, error: "BAD_ISSUED_AT" }; // clock skew > 5 min ahead
   }
 
-  // 5. Nonce — single-use, unexpired, address-bound (our DB hardening)
-  const rec = await db.nonce.findUnique({ where: { nonce: siwe.nonce } });
-  if (!rec || rec.usedAt) return { ok: false, error: "NONCE_INVALID" };
-  if (rec.expiresAt.getTime() < now) return { ok: false, error: "NONCE_EXPIRED" };
-  if (rec.address && rec.address !== address.toLowerCase()) {
-    return { ok: false, error: "NONCE_MISMATCH" };
-  }
+  // 5. Nonce — self-authenticating (HMAC proves WE minted it; TTL and
+  //    address binding are embedded in the MAC)
+  const ticket = verifyNonceTicket(siwe.nonce, address);
+  if (!ticket) return { ok: false, error: "NONCE_INVALID" };
 
   // 6. Signature — official verifySiweMessage (EOA + EIP-1271 smart wallets
   //    like AGW via on-chain isValidSignature, ERC-6492-aware)
@@ -203,17 +266,8 @@ export async function verifyAuth(params: {
     return { ok: false, error: "VERIFICATION_FAILED" };
   }
 
-  // 7. Burn the nonce (single-use — atomic claim guards concurrent replays)
-  const claimed = await db.nonce.updateMany({
-    where: { nonce: siwe.nonce, usedAt: null },
-    data: { usedAt: new Date() },
-  });
-  if (claimed.count === 0) return { ok: false, error: "NONCE_REPLAY" };
+  // 7. Burn the nonce (single-use — best-effort per isolate, see header)
+  if (!burnNonce(siwe.nonce)) return { ok: false, error: "NONCE_REPLAY" };
 
   return { ok: true, address: address.toLowerCase() };
-}
-
-/** Hash an IP for pseudonymous storage (privacy-preserving audit trail). */
-export function hashIp(ip: string): string {
-  return createHash("sha256").update(`${ip}:${serverConfig.SESSION_SECRET.slice(0, 16)}`).digest("hex").slice(0, 32);
 }

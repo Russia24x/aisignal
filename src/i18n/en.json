@@ -68,17 +68,11 @@
     "needPassDesc": "Registration is free; buy an access pass to unlock the daily signals.",
     "viewPlans": "View all plans",
     "factorHint": {
-      "emaTrend": "9/21-day exponential moving averages — the short-term trend. Positive = uptrend.",
-      "smaStructure": "20/50-day simple moving averages — the medium-term trend structure.",
-      "rsi": "Relative Strength Index — above 70 is overbought, below 30 oversold.",
-      "macd": "Moving-average convergence/divergence — histogram & signal line show momentum.",
-      "bollinger": "Bollinger Bands — volatility squeeze or expansion around the 20-day mean.",
-      "stochastic": "Stochastic oscillator — where price sits in its recent range; 80/20 mark saturated zones.",
-      "obv": "On-balance volume — confirms the trend via money flowing in and out.",
-      "vwap": "Volume-weighted average price — the institutional fair-value reference.",
-      "momentum": "Price momentum & slope — the speed and direction of the recent move.",
-      "volume": "Volume regime — trades vs their average; expansion confirms the move.",
-      "srLevels": "Support & resistance — key levels where price previously reacted."
+      "trend": "Trend structure via EMA20/EMA50: the spread between the averages and price position measure trend strength.",
+      "momentum": "ATR-normalized momentum: how many ATRs price traveled over the last 10 candles, plus trend slope.",
+      "macd": "ATR-normalized MACD histogram: medium-term trend strength and whether it is expanding or fading.",
+      "rsi": "Wilder RSI: overbought/oversold zones and direction confirmation in the healthy 40–75 range.",
+      "volume": "Volume regime: current volume vs its 20-candle average — high volume confirms moves, weak volume doubts them."
     },
     "nextSignal": "Next signal",
     "nextSignalHint": "The engine publishes a fresh signal every day at 00:00 UTC",
@@ -90,6 +84,18 @@
       "veryBearish": "Very bearish",
       "hint": "bull/bear balance across 11 indicators",
       "desc": "This dial is computed from the consensus of 11 technical indicators; the final verdict (BUY/SELL/HOLD) stays pass-gated."
+    },
+    "WAIT": "WAIT",
+    "signalScore": "Signal score",
+    "liveEngine": "Live multi-timeframe engine",
+    "tfScore": "Score",
+    "volatilityWarning": "Volatility is elevated — trade risk is higher than usual; size positions smaller.",
+    "band": {
+      "BUY": "Strong buy",
+      "WATCH": "Bullish bias — watch",
+      "WAIT": "Neutral — wait",
+      "WEAK": "Bearish bias — weak",
+      "SELL": "Strong sell"
     }
   },
   "payment": {
@@ -115,7 +121,11 @@
       "INVALID_TX_HASH": "Invalid transaction hash.",
       "UNAUTHORIZED": "Please sign in first.",
       "insufficient_balance": "Wallet balance is insufficient for this payment",
-      "send_failed": "Sending the transaction failed — try again"
+      "send_failed": "Sending the transaction failed — try again",
+      "QUOTE_REQUIRED": "A signed quote is required for this token — please retry.",
+      "QUOTE_INVALID": "Quote expired or invalid — close and reopen the dialog.",
+      "INSUFFICIENT_AMOUNT": "The transaction amount is below the plan price.",
+      "UNSUPPORTED_TOKEN": "This token is not supported for payment."
     },
     "balance": "PENGU balance",
     "insufficient": "Insufficient balance",
@@ -125,7 +135,10 @@
     "noGas": "Your ETH balance is zero — top up a little ETH from the Abstract Portal first, otherwise the transaction will fail",
     "confirmed": "Confirmed on-chain — verifying automatically…",
     "waitingConfirmation": "Waiting for Abstract network confirmation…",
-    "alreadyPaid": "Already paid? Enter the transaction hash"
+    "alreadyPaid": "Already paid? Enter the transaction hash",
+    "payWith": "Pay with",
+    "quoteNote": "Live conversion rate locked in (valid 30 minutes)",
+    "manualPenguOnly": "The manual path supports PENGU payments only; ETH payments must be sent from this browser."
   },
   "products": {
     "choose": "Choose plan",
@@ -264,7 +277,8 @@
     "confirm": "Confirm",
     "refresh": "Refresh",
     "language": "Language",
-    "backToTop": "Back to top"
+    "backToTop": "Back to top",
+    "day": "day"
   },
   "chart": {
     "daily": "Daily",
@@ -313,7 +327,12 @@
     "viewOnExplorer": "View on explorer",
     "openPortal": "Abstract Portal",
     "portalHint": "Swap, bridge and manage your assets",
-    "quickLinks": "Quick links"
+    "quickLinks": "Quick links",
+    "restore": "Restore purchases",
+    "restoreHint": "Scan the chain for your payments to the treasury and reactivate your pass",
+    "restore_restored": "Pass restored from chain ✓",
+    "restore_nothingNew": "No new on-chain payments found",
+    "restore_failed": "Chain scan failed — try again"
   },
   "alerts": {
     "title": "Price Alerts",

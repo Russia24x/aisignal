@@ -1,5 +1,6 @@
 /**
- * CoinGecko provider — historical OHLCV data for PENGU.
+ * CoinGecko provider — SECONDARY fallback for price snapshot and candles.
+ *
  * Public API (demo tier), no key required. Docs: https://docs.coingecko.com/
  *
  * CoinGecko granularity:
@@ -7,14 +8,17 @@
  *  - days=2..90  → hourly points
  *  - days>90     → daily points
  *
- * Strategy: fetch `days=90` (hourly) and aggregate to daily candles for
- * long-horizon indicators, plus `days=2` (hourly) for fresh intraday candles.
+ * Timeframe fallback mapping (see service.ts for orchestration):
+ *  - 15m → days=1 (5-min points, aggregated to 15m)
+ *  - 1h  → days=14 (hourly points)
+ *  - 4h  → days=30 (hourly points, aggregated to 4h)
+ *  - 1d  → days=120 (daily points)
  *
  * @module lib/modules/market/coingecko
  */
 import { serverConfig } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
-import type { Candle } from "./types";
+import type { Candle, MarketSnapshot, Timeframe } from "./types";
 
 const log = createLogger("market:coingecko");
 const BASE = "https://api.coingecko.com/api/v3";
@@ -58,8 +62,8 @@ interface MarketChart {
 }
 
 /**
- * Fetch hourly points for the last `days` and aggregate into candles.
- * Uses the ohlc endpoint which returns true OHLC at the source granularity.
+ * Fetch raw points for the last `days` (with volumes merged from
+ * market_chart) — source granularity depends on `days` (see header).
  */
 async function fetchOhlc(days: number): Promise<Candle[]> {
   const url = `${BASE}/coins/${COIN_ID}/ohlc?vs_currency=usd&days=${days}`;
@@ -92,14 +96,14 @@ async function fetchOhlc(days: number): Promise<Candle[]> {
   return candles.sort((a, b) => a.t - b.t);
 }
 
-/** Aggregate candles into UTC-day buckets. */
-export function aggregateToDaily(candles: Candle[]): Candle[] {
-  const byDay = new Map<string, Candle>();
+/** Aggregate candles into fixed UTC buckets of `intervalMs`. */
+export function aggregateToInterval(candles: Candle[], intervalMs: number): Candle[] {
+  const byBucket = new Map<number, Candle>();
   for (const c of candles) {
-    const day = new Date(c.t).toISOString().slice(0, 10);
-    const existing = byDay.get(day);
+    const bucket = Math.floor(c.t / intervalMs) * intervalMs;
+    const existing = byBucket.get(bucket);
     if (!existing) {
-      byDay.set(day, { ...c, t: Date.parse(`${day}T00:00:00Z`) });
+      byBucket.set(bucket, { ...c, t: bucket });
     } else {
       existing.h = Math.max(existing.h, c.h);
       existing.l = Math.min(existing.l, c.l);
@@ -107,23 +111,68 @@ export function aggregateToDaily(candles: Candle[]): Candle[] {
       existing.v += c.v;
     }
   }
-  return [...byDay.values()].sort((a, b) => a.t - b.t);
+  return [...byBucket.values()].sort((a, b) => a.t - b.t);
 }
 
-export interface HistoryResult {
-  daily: Candle[];
-  hourly: Candle[];
-  sources: string[];
+const TF_MS: Record<Timeframe, number> = {
+  "15m": 15 * 60 * 1000,
+  "1h": 60 * 60 * 1000,
+  "4h": 4 * 60 * 60 * 1000,
+  "1d": 24 * 60 * 60 * 1000,
+};
+
+/** CoinGecko day-window per timeframe (granularity rules above). */
+const TF_DAYS: Record<Timeframe, number> = {
+  "15m": 1,
+  "1h": 14,
+  "4h": 30,
+  "1d": 120,
+};
+
+/** Fallback candles for one timeframe (aggregated to the TF bucket). */
+export async function fetchTimeframe(timeframe: Timeframe): Promise<Candle[]> {
+  const raw = await fetchOhlc(TF_DAYS[timeframe]);
+  return aggregateToInterval(raw, TF_MS[timeframe]);
 }
 
-/** Fetch 90 days of history: daily (aggregated from hourly) + fresh hourly. */
-export async function fetchHistory(): Promise<HistoryResult> {
-  // days=90 → hourly granularity
-  const hourly90 = await fetchOhlc(90);
-  const daily = aggregateToDaily(hourly90);
-  // fresh hourly (days=2 → hourly, most recent points)
-  const hourly2 = await fetchOhlc(2);
-  return { daily, hourly: hourly2, sources: ["coingecko-ohlc", "coingecko-market_chart"] };
+interface MarketsEntry {
+  id: string;
+  current_price: number;
+  market_cap: number | null;
+  fully_diluted_valuation: number | null;
+  total_volume: number;
+  price_change_percentage_24h: number | null;
+  price_change_percentage_1h_in_currency: number | null;
+}
+
+/** Snapshot fallback from /coins/markets (one call: price, mcap, volume, 24h). */
+export async function fetchSnapshot(): Promise<MarketSnapshot> {
+  const list = await fetchJson<MarketsEntry[]>(
+    `${BASE}/coins/markets?vs_currency=usd&ids=${COIN_ID}&per_page=1&page=1`,
+    serverConfig.DATA_FETCH_TIMEOUT_MS,
+  );
+  const m = list?.[0];
+  if (!m || !Number.isFinite(m.current_price) || m.current_price <= 0) {
+    throw new Error("NO_MARKETS_ENTRY");
+  }
+  return {
+    symbol: "PENGU",
+    priceUsd: m.current_price,
+    change5m: null,
+    change1h: m.price_change_percentage_1h_in_currency ?? null,
+    change6h: null,
+    change24h: m.price_change_percentage_24h ?? 0,
+    volume24hUsd: m.total_volume ?? 0,
+    liquidityUsd: 0,
+    fdvUsd: m.fully_diluted_valuation ?? null,
+    marketCapUsd: m.market_cap ?? null,
+    dexId: "coingecko",
+    pairAddress: "",
+    pairUrl: `https://www.coingecko.com/en/coins/${COIN_ID}`,
+    quoteSymbol: "USD",
+    fetchedAt: Date.now(),
+    source: "coingecko",
+  };
 }
 
 /**

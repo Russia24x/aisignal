@@ -11,9 +11,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface MarketSnapshot {
   symbol: string;
   priceUsd: number;
-  change5m: number;
-  change1h: number;
-  change6h: number;
+  change5m: number | null;
+  change1h: number | null;
+  change6h: number | null;
   change24h: number;
   volume24hUsd: number;
   liquidityUsd: number;

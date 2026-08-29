@@ -4,19 +4,30 @@
  * @module lib/modules/market/types
  */
 
-/** Live snapshot of the PENGU market from DEX data. */
+/** Supported analysis timeframes (target plan §14 — deliberately few). */
+export type Timeframe = "15m" | "1h" | "4h" | "1d";
+
+export const TIMEFRAMES: readonly Timeframe[] = ["15m", "1h", "4h", "1d"] as const;
+
+export function isTimeframe(x: string): x is Timeframe {
+  return (TIMEFRAMES as readonly string[]).includes(x);
+}
+
+/** Live snapshot of the PENGU market. Assembled from Binance (price/24h),
+ *  DexScreener (Abstract pair liquidity/FDV/short-term changes) with
+ *  CoinGecko / CoinMarketCap as fallbacks. */
 export interface MarketSnapshot {
   symbol: string;
   /** current price in USD */
   priceUsd: number;
-  /** price changes in percent */
-  change5m: number;
-  change1h: number;
-  change6h: number;
+  /** price changes in percent (null when the provider lacked the window) */
+  change5m: number | null;
+  change1h: number | null;
+  change6h: number | null;
   change24h: number;
   /** 24h volume in USD */
   volume24hUsd: number;
-  /** pool liquidity in USD */
+  /** pool liquidity in USD (Abstract DEX pair; 0 when unknown) */
   liquidityUsd: number;
   /** fully diluted valuation in USD */
   fdvUsd: number | null;
@@ -28,7 +39,8 @@ export interface MarketSnapshot {
   pairUrl: string;
   quoteSymbol: string;
   fetchedAt: number;
-  source: "dexscreener";
+  /** which provider produced the price (binance | dexscreener | coingecko | coinmarketcap) */
+  source: string;
 }
 
 /** A single OHLCV candle. */
@@ -42,18 +54,13 @@ export interface Candle {
   v: number;
 }
 
-export interface HistoryData {
-  /** daily candles, ascending, oldest first */
-  daily: Candle[];
-  /** hourly candles for the last 24-48h (intraday context) */
-  hourly: Candle[];
+/** Candle series for one timeframe (ascending, oldest first). */
+export interface TimeframeData {
+  timeframe: Timeframe;
+  candles: Candle[];
+  /** provider that produced the series */
+  source: string;
   fetchedAt: number;
-  sources: string[];
-}
-
-export interface MarketOverview {
-  snapshot: MarketSnapshot;
-  history: HistoryData;
 }
 
 /** Errors carrying HTTP-ish semantics for API mapping. */

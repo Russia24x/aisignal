@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "INVALID_ADDRESS" }, { status: 400 });
   }
 
-  const { nonce } = await issueNonce(address);
+  const { nonce } = issueNonce(address);
   const issuedAt = new Date();
   const message = buildAuthMessage({ address, nonce, issuedAt });
 

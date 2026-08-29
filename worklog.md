@@ -1664,3 +1664,31 @@ Stage Summary:
 - Next-phase candidates: price-alert delivery channel decision still
   pending from owner; gamified onboarding roadmap in TrackRecord empty
   state; mini sparkline in LiveTicker; PWA manifest + install prompt
+
+---
+Task ID: 16
+Agent: main
+Task: v4 STATELESS REWRITE — converge to the target architecture (no database, multi-timeframe engine, multi-token payments, chain-as-database recovery) per user's target plan
+
+Work Log:
+- SESSION-START-SYNC-CHECK (per RULES.md): fetched origin, tree clean, local == origin/main (d3226e1) → safe to work
+- Deep codebase exploration (Explore agent) → full DB-usage map: 12 files importing prisma, 7 models (User/Nonce/AuthSession/Payment/AccessGrant/Signal/EngineSnapshot/PriceAlert)
+- Live feasibility probes: Abstract RPC eth_getLogs works with topic filters over 4M-block ranges (400d ≈ 13 chunks); Binance PENGUUSDT has all TFs (15m/1h/4h/1d); CMC keyless listing endpoint works (PENGU id 34466); USDC.e on Abstract verified via RPC (6 decimals, low liquidity → registered disabled); PENGU-on-Abstract on-chain transfer activity is near zero (payments create their own activity)
+- MARKET LAYER: binance.ts → multi-TF klines + 24h ticker snapshot + ETH price for quotes; coinmarketcap.ts NEW (keyless listing fallback, browser UA required); coingecko.ts → per-TF fallback via aggregateToInterval + /coins/markets snapshot fallback; service.ts → snapshot chain Binance→DexScreener(enrich)→DexScreener→CoinGecko→CoinMarketCap + per-TF caches with plan §13 TTL ladder (30/60/120/120s) + daily-365 series for history
+- ENGINE: signals.ts → FIVE factors per plan §3 (trend EMA20/50 w30, momentum ATR-normalized w25, MACD ATR-normalized w20, RSI14 w15, volume w10); engine.ts → score 0-100 (50=neutral), BUY ≥75 / SELL <25 / WAIT + 5-band internal (WATCH/WEAK), multi-TF primary (1d .35/4h .35/1h .2/15m .1), ATR risk levels from 4h, volatility warning (⚠ §16), bilingual human-language reasoning (§15); indicators.ts trimmed to the 8 functions needed
+- SIGNAL SERVICE (stateless): current signal cached 30s shared by all users; HISTORY = deterministic recompute from public daily candles (304 days replayed, winRate 49%, curve +44.4%); detail per-day recompute cached 15m; preview = consensus + TF dots only
+- ACCESS: passes.ts → v4 tariff (10/50/300/1500/3000 PENGU); tokens.ts NEW registry (PENGU erc20 + ETH native enabled, USDC.e registered disabled); payments.ts → multi-token verify (ERC-20 Transfer log OR native value), HMAC-signed quotes for ETH (30-min lock, ±3% slippage), expiry = PAYMENT BLOCK TIMESTAMP + duration (replay-safe by construction, no TX_ALREADY_USED table needed); entitlements.ts → derived from session claim (pure); restore.ts NEW → chunked eth_getLogs treasury scan (400d, 4M-block chunks) + chronological stacking replay
+- SECURITY: siwe.ts → stateless self-authenticating nonce v1<random48><tsHex><hmac64> (fully ALPHANUMERIC per EIP-4361 ABNF — first attempt with dots/base64url failed SiweInvalidMessageFieldError) + in-memory burn set; session.ts → sub==addr (wallet IS identity), ent claim embedded, mintEntitlement() re-mints after payment/restore
+- API: all DB-dependent routes rewritten; NEW /api/access/restore (rate-limit 6/5min, 10-min per-wallet cache); payment/config returns registry + signed quotes; payment/history + me/dashboard from light on-chain scan; alerts routes DELETED (client-side now)
+- FRONTEND: SignalSection → multi-TF card (primary verdict + 0-100 score bar + 4 TF chips with tooltips + band badge + volatility warning + levels only when actionable); PaymentDialog → PENGU/ETH token selector with signed quotes + native sendTransaction + manual path (PENGU-only note); MyDashboard → restore button with states; AuthProvider → background restore after every signIn; PriceAlerts → localStorage via useSyncExternalStore (canonical React pattern — fixes react-hooks/set-state-in-effect lint); PricingSection discount badges removed (flat v4 pricing); EngineSection/FactorList → 5 factors; SignalDetailDialog → 0-100 score, no S/R; TrackRecord compatible as-is
+- INFRA: prisma/@prisma/client/@prisma/adapter-d1 REMOVED from package.json; prisma/ dir + src/lib/db.ts + src/lib/modules/alerts/ DELETED; wrangler.jsonc → no d1_databases, new vars (TF TTLs, quote TTL/slippage, restore scan/cache, rate restore); .env/.env.example → no DATABASE_URL
+- i18n: +30 keys fa/en (signal.WAIT/signalScore/liveEngine/band.*/tfScore/volatilityWarning, factorHint.{trend,momentum,macd,rsi,volume}, payment.payWith/quoteNote/manualPenguOnly/errors.QUOTE_*/INSUFFICIENT_AMOUNT/UNSUPPORTED_TOKEN, dashboard.restore*)
+- DOCS: README + ARCHITECTURE + ACCESS-MODEL + SECURITY + API + DEPLOYMENT + TECH-STACK rewritten/patched for v4
+- QA: lint CLEAN; tsc --noEmit exit 0; API smoke: preview (TF dots live: 15m/1h/4h WAIT + 1d BUY), history (304 days deterministic), market/overview (Binance price + DexScreener enrichment), payment/config (ETH quotes live: PASS_1D=0.000037 ETH), signal/today 401/402 gates correct
+- E2E AUTH SCRIPT (scripts/e2e-auth.mjs): random wallet → nonce → SIWE sign → verify → bearer session → 402 gate → bogus tx 404 TX_NOT_FOUND → restore scan (0 found, scan executed) → dashboard → logout — ALL 9 STEPS PASSED
+
+Stage Summary:
+- The app now matches the target architecture: Database ❌ / Blockchain ✅ — zero persistence, chain is the source of truth, history is deterministically reproducible from public data
+- Honest tradeoffs documented in SECURITY.md §8: in-memory nonce burn is best-effort per isolate (compensating controls: domain+chain binding, 10-min TTL); native ETH payments can't be log-scanned (manual txHash path is replay-safe via block-timestamp expiry)
+- v4 tariff live: 10/50/300/1500/3000 PENGU; USDC.e registered but disabled until liquidity/verification
+- Next-phase candidates: Cloudflare Cache API for cross-isolate nonce burn; USDC enablement decision; burn rate-limit via Workers Rate Limiting binding; PWA manifest

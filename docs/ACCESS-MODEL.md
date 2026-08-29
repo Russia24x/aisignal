@@ -1,114 +1,89 @@
-# Access Model (v2) — Session-Key-Free
+# مدل دسترسی و معماری بدون دیتابیس — v4
 
-> Status: **active** since 2026-08 · Owner decision: stay OUTSIDE Abstract's
-> session-key review policies. This document is the contract between product,
-> code and docs. If the model changes, update this file in the same commit.
+## چرا بدون دیتابیس؟
 
-## 1. Tariff
+معماری هدف صریح است: **«هیچ دیتایی را دائمی ذخیره نمی‌کنیم»**. نتیجه:
 
-| Tier | Product ID | List | Discount | Price (PENGU) | ≈/day | Duration |
-|---|---|---:|---:|---:|---:|---|
-| Free | — | — | — | 0 | — | forever (browse-only) |
-| Day | `PASS_1D` | 10 | 0% | **10** | 10.0 | 1 day |
-| Week | `PASS_7D` | 70 | 10% | **63** | 9.0 | 7 days |
-| Month | `PASS_30D` | 300 | 20% | **240** | 8.0 | 30 days |
-| Year | `PASS_365D` | 3650 | 30% | **2555** | 7.0 | 365 days |
-| Lifetime | `PASS_LIFETIME` | 7300 | 30% | **5110** | — | ∞ (≈100 years, stored as a grant) |
-
-**Pricing formula (v3, balanced):** anchor = 10 PENGU for one day. Each
-longer tier gets a stepped duration discount — 10% (week), 20% (month),
-30% (year, hard cap) — producing a clean per-day staircase of
-10 → 9 → 8 → 7 PENGU. Lifetime is priced at exactly 2× the annual pass
-(≈ 6.7 PENGU/day for the first two years, free forever after).
-
-**Single source of truth:** `src/lib/modules/access/passes.ts` — imported by
-both server (verification, grants) and client (pricing grid). Changing a
-price or adding a tier is a one-file edit; no env vars, no duplication.
-
-**What the free tier includes:** wallet registration (SIWE-style signature
-auth), entry, live market data, the signal *preview* (indicator consensus
-counts only — no action, no levels), the public track record, and the
-personal dashboard. **Signal content is never part of the free tier.**
-
-**What every pass unlocks:** the same thing — the full daily signal
-(action, entry zone, stop-loss, take-profits, reasoning, factor breakdown,
-alert creation). Passes differ ONLY in duration.
-
-**Stacking:** a new pass extends from the later of *(now, current expiry)* —
-users never lose paid days by renewing early. Implemented in
-`lib/modules/access/payments.ts → verifyAndCredit()`.
-
-## 2. Payment flow (no session keys, by design)
-
-```
-User picks a pass
-   → wallet sends a plain ERC-20 `transfer(treasury, price)` on Abstract
-   → client submits ONLY the tx hash to POST /api/payment/verify
-   → server verifies against its own RPC:
-        1. receipt exists, status == success
-        2. Transfer log: token == PENGU, to == treasury,
-           from == authenticated wallet, value >= price
-        3. tx hash never credited before (replay protection)
-   → on success: Payment row + AccessGrant created atomically (DB transaction)
+```text
+Database ❌  PostgreSQL ❌  Supabase ❌  Firebase ❌  Redis ❌  D1 ❌
+Cloudflare Worker ✅  In-memory Cache ✅  AGW ✅  Public APIs ✅  Treasury ✅
 ```
 
-Why no session keys:
+هر قابلیت سابق، جایگزین stateless خودش را دارد:
 
-- **No approval/allowance is ever requested** from the user's wallet —
-  only standard `transfer()` calls the user signs themselves.
-- Session keys on Abstract currently go through extra review/audit
-  policies; plain transfers are trustless and require none of that.
-- Nothing is lost security-wise: the client never claims payment, the
-  server verifies everything on-chain against its own RPC.
-
-## 3. Content protection ("no access without a pass")
-
-All gating is **server-side**; the client only renders what the server sends:
-
-| Endpoint | Gate | Non-entitled response |
+| نیاز | راه‌حل v3 (DB) | راه‌حل v4 (بدون DB) |
 |---|---|---|
-| `GET /api/signal/today` | session + active pass | `402 PAYMENT_REQUIRED` — signal body never serialized |
-| `GET /api/signal/preview` | none (rate-limited) | consensus counts only; action/confidence/levels/reasoning are `null` server-side |
-| `GET /api/signal/history` | public track record | past day/action/outcome pairs (performance proof — by design); entry/TP/SL levels and reasoning are never included, and today's signal is never in the list |
-| `GET /api/me/dashboard` | session | per-user financial data only |
-| `POST /api/payment/verify` | session + rate limit | — |
-| `POST /api/alerts` | session (free-tier feature — market data, not signal content) | — |
+| nonce یک‌بارمصرف | جدول Nonce | nonce خودامضاشده (HMAC) + burn حافظه‌ای |
+| هویت کاربر | جدول User | آدرس کیف پول = هویت (session.sub) |
+| ثبت پرداخت / ضد replay | جدول Payment (txHash یکتا) | timestamp بلاک برای انقضا — replay بی‌فایده است |
+| دسترسی زمان‌دار | جدول AccessGrant | claim `ent` داخل session امضاشده |
+| سابقه سیگنال + Track record | جدول Signal | بازمحاسبه قطعی از کندل‌های عمومی |
+| هشدار قیمت | جدول PriceAlert | localStorage کلاینت |
+| بازگشت کاربر پولی | SELECT از جداول | اسکن eth_getLogs زنجیره |
 
-Additional hardening already in place: per-IP sliding-window rate limits on
-every route, single-use nonces for auth, HMAC session cookies, tx-hash
-uniqueness enforced twice (pre-check + inside the DB transaction).
+## تعرفه v4 (طبق §8 معماری هدف)
 
-## 4. Legacy migration (v1 → v2)
+منبع واحد: `src/lib/modules/access/passes.ts` (مشترک بین کلاینت و سرور — قیمت در کد است، نه در DB).
 
-v1 products (`PLATFORM_ACCESS`, `DAY_PASS`, `SUB_7`, `SUB_30`) no longer
-exist. Old `Payment` rows keep their original product ids and render with
-"(legacy)" labels in the dashboard. Users who held v1 platform access and
-had no grants received a one-time 30-day `LEGACY_PLATFORM` grant via a
-local-only migration script (`scripts/migrate-legacy-access.ts` — kept out
-of the repo; fresh production deploys start with an empty database and
-never need it).
+| پاس | قیمت (PENGU) | مدت | ≈ روزانه |
+|---|---|---|---|
+| PASS_1D | ۱۰ | ۱ روز | ۱۰.۰ |
+| PASS_7D | ۵۰ | ۷ روز | ۷.۱ |
+| PASS_30D | ۳۰۰ | ۳۰ روز | ۱۰.۰ |
+| PASS_365D | ۱٬۵۰۰ | ۳۶۵ روز | ۴.۱ |
+| PASS_LIFETIME | ۳٬۰۰۰ | ∞ | — (۲× سالانه) |
 
-## 5. Future: adding session keys (deliberately deferred)
+## توکن‌های پرداخت (§7 معماری هدف)
 
-The architecture is session-key-ready without containing any session-key
-code:
+رجیستری: `src/lib/modules/access/tokens.ts`
 
-- **Crediting is centralized** in `verifyAndCredit(txHash, user, product)` —
-  a future autopay only needs to produce a qualifying transfer and call the
-  same pipeline; grants, stacking and replay protection stay identical.
-- **Suggested future flow** (when product wants it):
-  1. user creates an AGW session key with a spend policy
-     (max X PENGU/day, only PENGU token, only our treasury, expiry N days);
-  2. our backend detects the pass expiry approaching and requests an
-     auto-renewal transfer through the session key;
-  3. the resulting tx goes through the same `verifyAndCredit` verification —
-     the trust model is unchanged because verification is on-chain.
-- Nothing in the current schema needs to change (`Payment.product` is a
-  free-form string; grants are duration-based).
+| توکن | نوع | Decimals | وضعیت |
+|---|---|---|---|
+| PENGU | ERC-20 روی Abstract | ۱۸ | ✅ فعال — ارز محصول، مبناى قیمت‌گذاری |
+| ETH | native | ۱۸ | ✅ فعال — کوت HMAC-امضاشده با نرخ قفل ۳۰ دقیقه |
+| USDC.e | ERC-20 روی Abstract | ۶ | ⛔ ثبت‌شده، غیرفعال (نقدینگی on-chain کم؛ بعد از تأیید فعالش کنید) |
 
-## 6. Pricing rationale note
+- **PENGU:** ترانسفر دقیق به خزانه؛ سرور مقدار را با کاتالوگ مطابقت می‌دهد
+- **ETH:** `/api/payment/config` کوت امضاشده برمی‌گرداند (`product|token|amountRaw|quotedAt` زیر HMAC)؛ verify با تحمل ۳٪ اسلیپیج نسبت به کوت
+- **انقضای پاس از timestamp بلاک** محاسبه می‌شود؛ replay تراکنش قدیمی پاس منقضی می‌دهد، نه آینده
 
-The week pass (5 PENGU) is intentionally the cheapest *total* entry point —
-a deliberate hook so new users pick it over the 1-day pass. Per-day value
-decreases monotonically from there: 0.71 → 1 → 0.27 → ∞-bounded. If the
-product owner ever wants a different ladder, edit `passes.ts` only.
+## جریان خرید
+
+```
+۱. GET /api/payment/config        ← توکن‌ها + کوت‌های امضاشده (per plan/token)
+۲. کاربر از کیف پول خودش (AGW) تراکنش می‌فرستد:
+     PENGU: transfer(treasury, price)
+     ETH:   sendTransaction(to=treasury, value=quoted)
+۳. POST /api/payment/verify {txHash, product, quote?}
+     سرور: receipt از RPC رسمی + همه بررسی‌ها (§SECURITY)
+۴. entitlement داخل session جدید مینت می‌شود ← همه سکشن‌ها reactive آپدیت می‌شوند
+```
+
+- **مسیر دستی** («قبلاً پرداخت کرده‌اید؟»): فقط PENGU — هش تراکنش را بچسبانید؛ چون from باید با کیف سشن یکی باشد، فقط برای همان کیف پول کار می‌کند
+- **Stacking:** پلن جدید از `max(انقضای فعلی, blockTime)` شروع می‌شود — تمدید زودهنگام روزها را هدر نمی‌دهد
+
+## بازیابی اشتراک از زنجیره (§9)
+
+`POST /api/access/restore` — زنجیره خودش دیتابیس است:
+
+1. اسکن چانکی `eth_getLogs` (پیش‌فرض ۴۰۰ روز، چانک‌های ۴M بلاکی) برای `Transfer(token, from=کیف شما, to=خزانه)`
+2. هر پرداخت → بزرگ‌ترین پلن قابل خرید (`passForAmount`)
+3. بازپخش زمانی: `exp = max(exp, blockTime) + days` — دقیقاً همان چیزی که موقع پرداخت مینت می‌شد
+4. بهترین entitlement داخل سشن مینت می‌شود (فقط اگر بهتر از سشن فعلی باشد)
+
+- بعد از هر **signIn** یکبار در پس‌زمینه اجرا می‌شود
+- دکمه «بازیابی خریدها» در داشبورد هم همین را صدا می‌زند
+- محدودیت: تراکنش native ETH لاگ ندارد → ETH فقط با هش دستی قابل بازیابی است (ضد replay با انقضای block-timestamp)
+- کش per-wallet ده‌دقیقه‌ای + rate-limit جداگانه (۶ درخواست / ۵ دقیقه)
+
+## لایه‌های محصول (§17 معماری هدف)
+
+```
+Layer 1 — Market    : Binance → DexScreener (enrich) → CoinGecko → CoinMarketCap
+Layer 2 — Intelligence : ۵ فاکتور × ۴ تایم‌فریم → score 0-100 → BUY/SELL/WAIT
+Layer 3 — Blockchain : AGW + پرداخت on-chain + خزانه + بازیابی + تأیید
+```
+
+## چیزهایی که عمداً ساخته نمی‌شود (§18)
+
+سیگنال on-chain ، trading bot ، معامله خودکار، مدیریت پرتفوی، چت، بک‌آفیس سنگین — همه پیچیدگی بی‌جهت می‌آورند. زنجیره فقط برای Identity / Payment / Access / Treasury / Verification استفاده می‌شود (§20).

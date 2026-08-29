@@ -5,14 +5,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/security/rate-limit";
 import { getSessionMode, destroySession } from "@/lib/security/session";
-import { getEntitlements } from "@/lib/modules/access/entitlements";
+import { entitlementsFromSession } from "@/lib/modules/access/entitlements";
 
 export async function GET(req: NextRequest) {
   const limited = guard(req, "public");
   if (limited) return limited;
 
   const { session, mode } = await getSessionMode();
-  const entitlements = await getEntitlements(session?.sub ?? null);
+  const entitlements = entitlementsFromSession(session);
   // `sessionMode` tells the client (and QA) whether the session arrived via
   // cookie or via the Bearer fallback — invaluable when debugging embedded
   // (iframe) previews where cookies are blocked.

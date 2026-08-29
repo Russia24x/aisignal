@@ -1,12 +1,15 @@
 /**
  * Technical indicator math library — pure functions, zero dependencies.
  *
+ * Trimmed in v4 to exactly what the five-factor engine needs (target plan §3):
+ * EMA, SMA, RSI, MACD, ATR, ROC, linear-regression slope, return stddev.
+ *
  * Every function takes a numeric series (oldest → newest) and returns either
  * the full series of values (aligned so that result[i] corresponds to
  * input[i], using null for warm-up periods) or the latest value helper.
  *
  * Conventions follow industry standards (Wilder smoothing for RSI/ATR,
- * standard MACD 12/26/9, Bollinger 20/2, etc.).
+ * standard MACD 12/26/9).
  *
  * @module lib/modules/analysis/indicators
  */
@@ -112,85 +115,6 @@ export function macd(closes: number[], fast = 12, slow = 26, signalPeriod = 9): 
   return { macd: macdLine, signal, histogram };
 }
 
-export interface BollingerResult {
-  middle: (number | null)[];
-  upper: (number | null)[];
-  lower: (number | null)[];
-  bandwidth: (number | null)[];
-  percentB: (number | null)[];
-}
-
-/** Bollinger Bands (default 20, 2 std devs). */
-export function bollinger(closes: number[], period = 20, mult = 2): BollingerResult {
-  const middle = sma(closes, period);
-  const upper: (number | null)[] = new Array(closes.length).fill(null);
-  const lower: (number | null)[] = new Array(closes.length).fill(null);
-  const bandwidth: (number | null)[] = new Array(closes.length).fill(null);
-  const percentB: (number | null)[] = new Array(closes.length).fill(null);
-  for (let i = period - 1; i < closes.length; i++) {
-    const m = middle[i];
-    if (m === null) continue;
-    let variance = 0;
-    for (let j = i - period + 1; j <= i; j++) variance += (closes[j] - m) ** 2;
-    const sd = Math.sqrt(variance / period);
-    upper[i] = m + mult * sd;
-    lower[i] = m - mult * sd;
-    bandwidth[i] = m !== 0 ? (upper[i] as number) - (lower[i] as number) / m : null;
-    const range = (upper[i] as number) - (lower[i] as number);
-    percentB[i] = range !== 0 ? (closes[i] - (lower[i] as number)) / range : 0.5;
-  }
-  return { middle, upper, lower, bandwidth, percentB };
-}
-
-export interface StochasticResult {
-  k: (number | null)[];
-  d: (number | null)[];
-}
-
-/** Stochastic Oscillator (default 14,3,3 — we use 14/3 smoothing). */
-export function stochastic(
-  highs: number[],
-  lows: number[],
-  closes: number[],
-  kPeriod = 14,
-  dPeriod = 3,
-): StochasticResult {
-  const kRaw: (number | null)[] = new Array(closes.length).fill(null);
-  for (let i = kPeriod - 1; i < closes.length; i++) {
-    let hh = -Infinity;
-    let ll = Infinity;
-    for (let j = i - kPeriod + 1; j <= i; j++) {
-      hh = Math.max(hh, highs[j]);
-      ll = Math.min(ll, lows[j]);
-    }
-    kRaw[i] = hh === ll ? 50 : ((closes[i] - ll) / (hh - ll)) * 100;
-  }
-  // %K smoothing (3) then %D = SMA(%K,3)
-  const kSeries: number[] = [];
-  const kIdx: number[] = [];
-  for (let i = 0; i < kRaw.length; i++) {
-    if (kRaw[i] === null) continue;
-    kSeries.push(kRaw[i] as number);
-    kIdx.push(i);
-  }
-  const kSmoothedVals = sma(kSeries, 3);
-  const k: (number | null)[] = new Array(closes.length).fill(null);
-  for (let i = 0; i < kIdx.length; i++) k[kIdx[i]] = kSmoothedVals[i];
-  // %D
-  const validK: number[] = [];
-  const validIdx: number[] = [];
-  for (let i = 0; i < k.length; i++) {
-    if (k[i] !== null) {
-      validK.push(k[i] as number);
-      validIdx.push(i);
-    }
-  }
-  const dVals = sma(validK, dPeriod);
-  const d: (number | null)[] = new Array(closes.length).fill(null);
-  for (let i = 0; i < validIdx.length; i++) d[validIdx[i]] = dVals[i];
-  return { k, d };
-}
-
 /** True Range series. */
 function trueRange(highs: number[], lows: number[], closes: number[]): number[] {
   const out: number[] = [];
@@ -213,34 +137,6 @@ export function atr(highs: number[], lows: number[], closes: number[], period = 
   // realign: tr[i-1] corresponds to candle i
   const out: (number | null)[] = new Array(closes.length).fill(null);
   for (let i = 1; i < closes.length; i++) out[i] = smoothed[i - 1];
-  return out;
-}
-
-/** On-Balance Volume. */
-export function obv(closes: number[], volumes: number[]): number[] {
-  const out: number[] = [0];
-  for (let i = 1; i < closes.length; i++) {
-    const prev = out[i - 1];
-    if (closes[i] > closes[i - 1]) out.push(prev + volumes[i]);
-    else if (closes[i] < closes[i - 1]) out.push(prev - volumes[i]);
-    else out.push(prev);
-  }
-  return out;
-}
-
-/** Rolling Volume-Weighted Average Price. */
-export function rollingVwap(highs: number[], lows: number[], closes: number[], volumes: number[], period = 20): (number | null)[] {
-  const out: (number | null)[] = new Array(closes.length).fill(null);
-  for (let i = period - 1; i < closes.length; i++) {
-    let pv = 0;
-    let vol = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      const typical = (highs[j] + lows[j] + closes[j]) / 3;
-      pv += typical * volumes[j];
-      vol += volumes[j];
-    }
-    out[i] = vol > 0 ? pv / vol : null;
-  }
   return out;
 }
 
@@ -279,61 +175,4 @@ export function linregSlope(closes: number[], period = 20): number | null {
   if (den === 0) return null;
   const slope = num / den;
   return yMean !== 0 ? slope / yMean : null;
-}
-
-export interface SwingLevel {
-  price: number;
-  kind: "support" | "resistance";
-  touches: number;
-}
-
-/**
- * Detect swing-based support & resistance:
- * pivots (local extremes over `lookback` candles) clustered within tolerance.
- */
-export function swingLevels(
-  highs: number[],
-  lows: number[],
-  closes: number[],
-  lookback = 30,
-  clusterTolerance = 0.02,
-): SwingLevel[] {
-  const n = closes.length;
-  if (n < lookback * 2) return [];
-  const start = Math.max(1, n - lookback * 2);
-  const pivot = 3;
-  const rawLevels: { price: number; kind: "support" | "resistance" }[] = [];
-  for (let i = start + pivot; i < n - pivot; i++) {
-    // local maximum?
-    let isMax = true;
-    let isMin = true;
-    for (let j = i - pivot; j <= i + pivot; j++) {
-      if (j === i) continue;
-      if (highs[j] >= highs[i]) isMax = false;
-      if (lows[j] <= lows[i]) isMin = false;
-    }
-    if (isMax) rawLevels.push({ price: highs[i], kind: "resistance" });
-    if (isMin) rawLevels.push({ price: lows[i], kind: "support" });
-  }
-  // cluster nearby levels
-  const sorted = [...rawLevels].sort((a, b) => a.price - b.price);
-  const clusters: { prices: number[]; kinds: ("support" | "resistance")[] }[] = [];
-  for (const lvl of sorted) {
-    const last = clusters[clusters.length - 1];
-    if (last) {
-      const avg = last.prices.reduce((a, b) => a + b, 0) / last.prices.length;
-      if (Math.abs(lvl.price - avg) / avg <= clusterTolerance) {
-        last.prices.push(lvl.price);
-        last.kinds.push(lvl.kind);
-        continue;
-      }
-    }
-    clusters.push({ prices: [lvl.price], kinds: [lvl.kind] });
-  }
-  const price = closes[n - 1];
-  return clusters.map((c) => {
-    const avg = c.prices.reduce((a, b) => a + b, 0) / c.prices.length;
-    const kind: "support" | "resistance" = avg <= price ? "support" : "resistance";
-    return { price: avg, kind, touches: c.prices.length };
-  });
 }

@@ -1,8 +1,12 @@
 /**
  * GET /api/me/dashboard — per-user dashboard summary (access pass status,
- * payments, membership) for any AUTHENTICATED user. Entry and browsing are
- * free since the v2 access model; signal content itself stays server-gated.
- * Returns 401 if not authenticated.
+ * payments) for any AUTHENTICATED user. Entry and browsing are free; signal
+ * content itself stays server-gated. Returns 401 if not authenticated.
+ *
+ * v4 STATELESS: the entitlement comes from the signed session claim; the
+ * payment list is a light on-chain scan (last 45 days, cached 10 min per
+ * wallet). "memberSince" is the session issue time — there is no account
+ * record anywhere.
  *
  * Response shape:
  *   {
@@ -14,8 +18,8 @@
  *         progressPercent, lifetime
  *       } | null,
  *       payments: [...last5],    // { txHash, product, amountToken, status, verifiedAt }
- *       memberSince: string,     // account creation date
- *       paymentsCount: number,   // total verified payments
+ *       memberSince: string,     // session issue time (no account record exists)
+ *       paymentsCount: number,   // on-chain payments found in the scan window
  *       daysLeft: number,
  *       totalSpentPengu: number,
  *     }
@@ -26,9 +30,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guard } from "@/lib/security/rate-limit";
 import { getSession } from "@/lib/security/session";
-import { getEntitlements } from "@/lib/modules/access/entitlements";
-import { isLifetimePass, LIFETIME_GRANT_DAYS } from "@/lib/modules/access/passes";
-import { db } from "@/lib/db";
+import { entitlementsFromSession } from "@/lib/modules/access/entitlements";
+import { isLifetimePass, LIFETIME_GRANT_DAYS, DAY_MS, passForAmount } from "@/lib/modules/access/passes";
+import { scanPayments } from "@/lib/modules/access/restore";
 
 // never cache a per-user dashboard response
 export const dynamic = "force-dynamic";
@@ -42,75 +46,70 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });
   }
 
-  const entitlements = await getEntitlements(session.sub);
+  const entitlements = entitlementsFromSession(session);
+  const ent = session.ent ?? null;
+  const now = Date.now();
+  const active = ent !== null && (ent.lifetime || ent.expiresAt > now);
 
-  const now = new Date();
-
-  // Active grant (the most-recently expiring one). We re-fetch it directly
-  // (rather than reusing entitlements.activeGrant) because we also need
-  // startsAt to draw a meaningful progress bar.
-  const grant = await db.accessGrant.findFirst({
-    where: { userId: session.sub, expiresAt: { gt: now } },
-    orderBy: { expiresAt: "desc" },
-  });
-
-  const lifetime = grant ? isLifetimePass(grant.product) : false;
-  const totalDays = grant
-    ? Math.max(1, Math.round((grant.expiresAt.getTime() - grant.startsAt.getTime()) / (24 * 3600 * 1000)))
+  const lifetime = active ? isLifetimePass(ent!.product) : false;
+  // the claim's grant span: mintedAt → expiresAt (from the payment block)
+  const totalDays = active
+    ? Math.max(1, Math.round((ent!.expiresAt - ent!.mintedAt) / DAY_MS))
     : 0;
-  const daysLeft = grant
-    ? Math.max(0, Math.ceil((grant.expiresAt.getTime() - now.getTime()) / (24 * 3600 * 1000)))
-    : 0;
-  const progressPercent = grant
-    ? Math.max(0, Math.min(100, (daysLeft / totalDays) * 100))
-    : 0;
+  const daysLeft = active ? Math.max(0, Math.ceil((ent!.expiresAt - now) / DAY_MS)) : 0;
+  const progressPercent = active ? Math.max(0, Math.min(100, (daysLeft / Math.max(1, totalDays)) * 100)) : 0;
 
-  const [payments, spentAgg, countAgg, user] = await Promise.all([
-    db.payment.findMany({
-      where: { userId: session.sub, status: "VERIFIED" },
-      orderBy: { verifiedAt: "desc" },
-      take: 5,
-    }),
-    db.payment.aggregate({
-      _sum: { amountToken: true },
-      where: { userId: session.sub, status: "VERIFIED" },
-    }),
-    db.payment.count({
-      where: { userId: session.sub, status: "VERIFIED" },
-    }),
-    db.user.findUnique({
-      where: { id: session.sub },
-      select: { createdAt: true },
-    }),
-  ]);
+  // light on-chain payment scan (45 days, cached per wallet)
+  let payments: Array<{
+    txHash: string;
+    product: string | null;
+    amountToken: number;
+    status: string;
+    verifiedAt: string;
+  }> = [];
+  let paymentsCount = 0;
+  let totalSpentPengu = 0;
+  try {
+    const found = await scanPayments(session.addr, 45);
+    paymentsCount = found.length;
+    totalSpentPengu = found
+      .filter((p) => p.token === "PENGU")
+      .reduce((a, p) => a + p.amountToken, 0);
+    payments = [...found]
+      .reverse()
+      .slice(0, 5)
+      .map((p) => ({
+        txHash: p.txHash,
+        product: passForAmount(p.amountToken)?.id ?? null,
+        amountToken: p.amountToken,
+        status: "VERIFIED",
+        verifiedAt: new Date(p.blockTimestamp).toISOString(),
+      }));
+  } catch {
+    // RPC hiccup — degrade gracefully with an empty list
+  }
 
   return NextResponse.json(
     {
       ok: true,
       dashboard: {
         entitlements,
-        activeGrant: grant
+        activeGrant: active
           ? {
-              product: grant.product,
-              startsAt: grant.startsAt.toISOString(),
-              expiresAt: grant.expiresAt.toISOString(),
+              product: ent!.product,
+              startsAt: new Date(ent!.mintedAt).toISOString(),
+              expiresAt: new Date(ent!.expiresAt).toISOString(),
               daysLeft,
               totalDays: lifetime ? LIFETIME_GRANT_DAYS : totalDays,
               progressPercent,
               lifetime,
             }
           : null,
-        payments: payments.map((p) => ({
-          txHash: p.txHash,
-          product: p.product,
-          amountToken: p.amountToken,
-          status: p.status,
-          verifiedAt: p.verifiedAt.toISOString(),
-        })),
-        memberSince: (user?.createdAt ?? new Date()).toISOString(),
-        paymentsCount: countAgg,
+        payments,
+        memberSince: new Date(session.iat).toISOString(),
+        paymentsCount,
         daysLeft,
-        totalSpentPengu: spentAgg._sum.amountToken ?? 0,
+        totalSpentPengu: Math.round(totalSpentPengu * 100) / 100,
       },
     },
     {
