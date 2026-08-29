@@ -1692,3 +1692,88 @@ Stage Summary:
 - Honest tradeoffs documented in SECURITY.md §8: in-memory nonce burn is best-effort per isolate (compensating controls: domain+chain binding, 10-min TTL); native ETH payments can't be log-scanned (manual txHash path is replay-safe via block-timestamp expiry)
 - v4 tariff live: 10/50/300/1500/3000 PENGU; USDC.e registered but disabled until liquidity/verification
 - Next-phase candidates: Cloudflare Cache API for cross-isolate nonce burn; USDC enablement decision; burn rate-limit via Workers Rate Limiting binding; PWA manifest
+
+---
+Task ID: 28
+Agent: main
+Task: ممیزی حرفه‌ای + پولیش + تمیزکاری کد، و تشخیص «چرا امکان خرید نیست»
+
+Work Log:
+- SESSION-START-SYNC-CHECK: tree clean, local == origin/main (d5af517)
+- FORENSICS (why purchase is impossible): dev.log showed a REAL failed
+  purchase — wallet 0x50a3e6… authenticated 11:16, POST /api/payment/verify
+  → 404 TX_NOT_FOUND. On-chain RPC probe: 0x50a3e6… holds 0 PENGU + 0 ETH
+  on Abstract → Pay button was silently DISABLED (balanceOk=false) with no
+  funding guidance; treasury made 3 recent self-transfers (5/1/10 PENGU)
+  during owner testing. Pasted hash was never on Abstract (likely sent on
+  Solana/ETH mainnet/exchange — PENGU lives on many chains)
+- PROFESSIONAL AUDIT (Explore agent, read-only): 1 CRITICAL, 4 HIGH,
+  14 MEDIUM, 13 LOW findings with file:line refs; verified-sound list too
+  (SIWE, session HMAC, paywall, indicators, no lookahead in replay)
+- C1 FIXED (replay stacking = money printer): EntitlementClaim now carries
+  paidAt (block ts of newest consumed payment); verifyPayment takes the
+  full currentClaim and rejects same-txHash or blockTs<=paidAt while
+  active → TX_ALREADY_USED; sticky lifetime across re-mints
+- H1: clientIp trusts cf-connecting-ip, else LAST XFF hop (first element
+  was spoofable → full rate-limit bypass off-Cloudflare)
+- H3: timingSafeEqual for nonce-ticket + quote MACs (siwe.ts, payments.ts)
+- H4: live signal drops the still-open Binance candle (closedOnly per TF)
+  — matches replay semantics, kills volume-factor bias
+- H2: TTLCache cold path dedupes in-flight loaders (stampede guard, with
+  placeholder cleanup on failure)
+- M-batch: PENGU address single-sourced from publicConfig (tokens.ts);
+  restore maps passes in exact bigints, PENGU-only (USDC scan hits can't
+  mint); under-scan warn when chunk guard trips; market/overview error
+  detail no longer leaked; no-store on auth/session + signal/today +
+  payment/history; signal/history try/catch + int paging; degraded flag
+  on failed scans (payment/history + me/dashboard); honest startsAt/totalDays
+  from paidAt; OG copy → real 5 factors
+- M-frontend: useMarket → MarketProvider (ONE poller app-wide, was 9 ×
+  60s polls/visitor; useMarket.tsx); PaymentDialog config fetch gets
+  AbortController (stale-quote race) + aria-pressed token buttons;
+  SignalDetailDialog error cache TTL 30s (was sticky forever); TrackRecord
+  rows keyboard-accessible; drop-shadow var-alpha CSS bug → color-mix
+- THE PURCHASE FIX (PaymentDialog): funding panel on insufficient/empty
+  balance or no-gas — Abstract Portal button, copy-wallet-address,
+  DexScreener swap link, explicit wrong-chain warning (PENGU from
+  Solana/Ethereum/exchanges can never verify), balances auto-refetch
+  every 12s so Pay re-enables when funds land; disabled-button reason
+  line; TX_NOT_FOUND + TX_ALREADY_USED copy rewritten (fa+en)
+- CLEANUP: 16 unused i18n keys pruned (parity verified), dead exports
+  removed (MarketDataError, returnsStdDev, analysisWindow, fetchPenguUsd,
+  SESSION_COOKIE_NAME, isTimeframe), console.* → createLogger (preview,
+  agw-bridge), x-agw-details-source header dropped, MESSAGE_TTL_MS
+  dedup, CoinGecko fallback v=0 (rolling volumes were poisoning the
+  volume factor), stale comments fixed (PriceChart source, Hero locale
+  hack → real locale), db/custom.db (v3 leftover) + tool-results/ deleted
+- DOCS: SECURITY.md + ACCESS-MODEL.md — paidAt replay-guard layer
+  documented (the old "replay yields expired pass" claim was only true
+  without an ACTIVE pass)
+- QA: scripts/test-replay-guard.ts (bun) — 11/11 PASS (stacking math,
+  paidAt, lifetime sticky, bigint boundary 9.999…999, USDC-scan
+  rejection); e2e-auth 9/9 PASS on the new claim shape; all endpoints
+  smoke-tested (200/401/405 as designed); fresh browser 0 page/console
+  errors; pricing 6 cards; plan-click → real AGW popup (regression);
+  FA↔EN + RTL/LTR; mobile 390px zero overflow; market polls: 2 fetches
+  in 2min vs ~9/min before (StrictMode initial double only); funding
+  panel CSS classes verified compiled (border-hold/40 bg-hold/5 text-hold)
+- Dev server OOM-reaped once mid-round (known sandbox quirk) → restarted
+  with setsid nohup, recovered; stale HMR errors on the long-lived
+  browser cleared by a fresh browser launch
+- Committed 0f5cc7e → pushed to origin/main (37 files, +588/−249)
+
+Stage Summary:
+- ROOT CAUSE of "امکان خرید نیست": user's AGW wallet had ZERO PENGU/ETH on
+  Abstract → dead disabled Pay button + no guidance; their fallback
+  (pasting a tx hash from another chain) hit TX_NOT_FOUND. Now the dialog
+  teaches the user exactly how to fund (portal/swap/copy + wrong-chain
+  warning) and live re-enables payment when funds arrive
+- CRITICAL revenue hole closed: replaying one paid tx can no longer stack
+  passes forever (paidAt guard + TX_ALREADY_USED); lifetime can't be
+  downgraded; restore uses exact bigint mapping
+- Audit slate cleared: 1 CRITICAL + 4 HIGH fixed, all MEDIUMs that matter
+  fixed, LOWs cleaned; codebase now lint/tsc clean with zero dead exports
+  and zero stray console.* in the logger-covered paths
+- Next-phase candidates: USDC.e enablement decision; per-isolate nonce
+  burn via Cloudflare Cache API; PWA manifest; signal alert delivery
+  channel decision still pending from owner
