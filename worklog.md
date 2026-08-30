@@ -10,6 +10,19 @@ PenguSignals: A modern minimal PENGU (Pudgy Penguins) trading signal platform bu
 - PENGU token on Abstract (verified via RPC eth_call): 0x9eBe3A824Ca958e4b3Da772D2065518F009CBa62, 18 decimals, symbol PENGU
 - Abstract mainnet: chainId 2741, RPC https://api.mainnet.abs.xyz, explorer https://abscan.org
 
+## Golden Rules — پروتکل کاری الزامی (added after owner directive)
+0. **قدم صفرِ هر تسک: چکِ سینک قبل از هر کاری** — Before ANY work, every session, every task:
+   `git fetch origin && git status && git log --oneline -3 origin/main`
+   - If local is BEHIND → `git pull --ff-only origin main` first.
+   - If DIVERGED or file modes flipped (sandbox-reset symptom) → STOP. Stash real work, `git reset --hard origin/main`, re-apply changes cleanly on top. NEVER commit on top of diverged history. NEVER `push --force`.
+   - Only when `git diff origin/main HEAD` is empty and tree is clean may work begin.
+1. Sequential Task IDs; one task = one logical unit of work.
+2. Every task appends a worklog entry (Task ID / Agent / Task / Work Log / Stage Summary) — never overwrite history.
+3. Commit + push to `origin/main` after every completed step (code fix + its worklog entry together).
+4. Working copy: `/home/z/my-project` only.
+5. Owner language: فارسی — all owner-facing reports in Persian; worklog stays English/bilingual.
+6. Definition of done: `tsc` PASS + `eslint` PASS + runtime probe where feasible + pushed.
+
 ---
 Task ID: 1
 Agent: main
