@@ -27,7 +27,7 @@
  */
 import { createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { cookies, headers } from "next/headers";
-import { serverConfig } from "@/lib/config";
+import { serverConfig, getSessionSecret } from "@/lib/config";
 
 const COOKIE_NAME = "pengu_session";
 
@@ -68,7 +68,7 @@ function b64url(buf: Buffer | string): string {
 }
 
 function sign(data: string): string {
-  return createHmac("sha256", serverConfig.SESSION_SECRET).update(data).digest("base64url");
+  return createHmac("sha256", getSessionSecret()).update(data).digest("base64url");
 }
 
 export function encodeSession(payload: SessionPayload): string {

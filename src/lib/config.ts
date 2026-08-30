@@ -6,6 +6,14 @@
  *  - Values are parsed & validated once at module load; invalid config fails fast.
  *  - Public values are exposed through `publicConfig` for client components.
  *
+ * BUILD-TIME SAFETY (v4.1): `next build` evaluates this module while collecting
+ * page data — in CI (Cloudflare Workers Builds) no .env file exists, so this
+ * module must NEVER require a secret at import time. Therefore:
+ *  - Public chain constants carry Abstract-mainnet defaults (they are
+ *    public-by-design: they ship in the client bundle and wrangler.jsonc).
+ *  - SESSION_SECRET is validated lazily by getSessionSecret() at the first
+ *    request that signs/verifies — never at build.
+ *
  * v4 (stateless architecture): DATABASE_URL is GONE. The application keeps
  * NO persistent storage — market data is fetched live and cached in memory,
  * entitlements live inside the HMAC-signed session, payments are verified
@@ -36,18 +44,24 @@ const ethereumAddress = z
 const serverSchema = z.object({
   APP_NAME: z.string().min(1).default("PenguSignals"),
   APP_URL: z.string().url().default("http://localhost:3000"),
-  SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be >= 32 chars"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
-  // Chain (server-side verification uses these)
-  NEXT_PUBLIC_CHAIN_ID: z.coerce.number().int().positive(),
-  NEXT_PUBLIC_RPC_URL: z.string().url(),
-  NEXT_PUBLIC_EXPLORER_URL: z.string().url(),
+  // Chain (server-side verification uses these). Defaults = Abstract mainnet —
+  // these are public-by-design values (client bundle + wrangler.jsonc vars),
+  // so a safe default lets `next build` run in CI without dashboard env.
+  NEXT_PUBLIC_CHAIN_ID: z.coerce.number().int().positive().default(2741),
+  NEXT_PUBLIC_RPC_URL: z.string().url().default("https://api.mainnet.abs.xyz"),
+  NEXT_PUBLIC_EXPLORER_URL: z.string().url().default("https://abscan.org"),
 
   // Tokens & payments (tariff itself lives in lib/modules/access/passes.ts —
-  // the single source of truth shared by client and server)
-  NEXT_PUBLIC_PENGU_TOKEN: ethereumAddress,
-  NEXT_PUBLIC_TREASURY: ethereumAddress,
+  // the single source of truth shared by client and server). Defaults = the
+  // verified mainnet PENGU token and the project treasury.
+  NEXT_PUBLIC_PENGU_TOKEN: ethereumAddress.default(
+    "0x9eBe3A824Ca958e4b3Da772D2065518F009CBa62",
+  ),
+  NEXT_PUBLIC_TREASURY: ethereumAddress.default(
+    "0x60Df4E186364c3a49A550Aee29Da1d5fe3658818",
+  ),
 
   // Data services
   MARKET_CACHE_TTL_MS: z.coerce.number().default(60_000),
@@ -107,6 +121,42 @@ if (!parsed.success) {
 }
 
 const env = parsed.data;
+
+/* ------------------------------------------------------------------ */
+/* Session secret (lazy — runtime-only, never required at build)       */
+/* ------------------------------------------------------------------ */
+
+const SESSION_SECRET_MIN = 32;
+
+/** True when a usable SESSION_SECRET is present (health probe). */
+export function isSessionSecretConfigured(): boolean {
+  const secret = process.env.SESSION_SECRET;
+  return typeof secret === "string" && secret.length >= SESSION_SECRET_MIN;
+}
+
+/**
+ * HMAC key for sessions, nonces and payment quotes.
+ *
+ * Validated LAZILY on purpose: this module is evaluated during `next build`
+ * page-data collection, and CI environments must not need the secret. The
+ * first request that signs or verifies triggers validation with an
+ * actionable operator-facing message.
+ */
+export function getSessionSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (typeof secret !== "string" || secret.length < SESSION_SECRET_MIN) {
+    throw new Error(
+      [
+        "SESSION_SECRET is missing or shorter than 32 characters.",
+        "Set it before signing sessions:",
+        "  • Cloudflare: bunx wrangler secret put SESSION_SECRET",
+        "    (or Workers dashboard → Settings → Variables & Secrets)",
+        "  • Local: add a 32+ char value to .env — e.g. openssl rand -hex 32",
+      ].join("\n"),
+    );
+  }
+  return secret;
+}
 
 /* ------------------------------------------------------------------ */
 /* Public config                                                       */

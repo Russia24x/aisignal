@@ -70,6 +70,36 @@ npm run deploy
 خروجی آدرس نهایی را می‌دهد: `https://pengu-signals.<زیردامنه>.workers.dev`
 (SSL خودکار و رایگان). اگر `APP_URL` را بعد از دیپلوی فهمیدید، به‌روز کنید و یکبار دیگر deploy بزنید.
 
+## گام ۵-ب — استقرار خودکار با Git (Workers Builds)
+
+اگر مخزن را در داشبورد Cloudflare به Workers وصل کرده‌اید (Builds خودکار روی
+هر push)، این تنظیمات را در **Settings → Builds & Deployments** بگذارید:
+
+| فیلد | مقدار |
+|---|---|
+| Build command | `bun run build` |
+| Deploy command | `bunx wrangler deploy` |
+
+نکته‌ها:
+
+- `bun run build` از نسخهٔ v4.1 به بعد `opennextjs-cloudflare build` است —
+  یعنی هم `next build` را می‌زند و هم خروجی ورکر (`.open-next/`) را می‌سازد؛
+  برای build خام Next دستور `bun run build:next` وجود دارد.
+- **هیچ متغیر محیطی‌ای در تنظیمات Build لازم نیست.** همهٔ متغیرهای عمومی
+  (chain id، RPC، explorer، آدرس PENGU و خزانه) مقدار پیش‌فرضِ mainnet دارند
+  و در runtime از `vars` فایل `wrangler.jsonc` خوانده می‌شوند.
+- **`SESSION_SECRET` باید حتماً به‌عنوان Secret تنظیم شود** (گام ۲) — در
+  محیط Build هرگز نیست و نباشد؛ در اولین درخواستِ امضا/ورریفای چک می‌شود.
+- بعد از اولین deploy، درستیِ setup را با یک curl چک کنید:
+
+```bash
+curl https://<آدرس-نهایی>/api
+# {"ok":true,"service":"pengu-signals","sessionConfigured":true,...}
+```
+
+اگر `sessionConfigured:false` بود یعنی Secret تنظیم نشده — گام ۲ را انجام دهید.
+مکث چنددقیقه‌ای بعد از set/delete یک Secret طبیعی است (propagation).
+
 ## گام ۶ — دامنه سفارشی (اختیاری، رایگان)
 
 اگر دامنه‌ای در همین حساب Cloudflare دارید:

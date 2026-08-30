@@ -51,7 +51,7 @@ import {
   validateSiweMessage,
 } from "viem/siwe";
 import type { PublicClient } from "viem";
-import { serverConfig, publicConfig } from "@/lib/config";
+import { serverConfig, publicConfig, getSessionSecret } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
 
 const log = createLogger("auth:siwe");
@@ -94,7 +94,7 @@ function allowedDomains(extraHost?: string | null): Set<string> {
 /* ------------------------------------------------------------------ */
 
 function mac(data: string): string {
-  return createHmac("sha256", serverConfig.SESSION_SECRET).update(data).digest("base64url");
+  return createHmac("sha256", getSessionSecret()).update(data).digest("base64url");
 }
 
 /**

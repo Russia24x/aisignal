@@ -24,7 +24,7 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createPublicClient, http, type PublicClient, type Log } from "viem";
-import { serverConfig, publicConfig } from "@/lib/config";
+import { serverConfig, publicConfig, getSessionSecret } from "@/lib/config";
 import { createLogger } from "@/lib/logger";
 import { passById, isLifetimePass, LIFETIME_GRANT_DAYS, DAY_MS } from "./passes";
 import { payTokenByKey, payTokenByAddress, toBaseUnits, fromBaseUnits, TRANSFER_TOPIC, type PayTokenKey } from "./tokens";
@@ -54,7 +54,7 @@ export interface SignedQuote {
 }
 
 function quoteMac(product: string, token: string, amountRaw: string, quotedAt: number): string {
-  return createHmac("sha256", serverConfig.SESSION_SECRET)
+  return createHmac("sha256", getSessionSecret())
     .update(`${product}|${token}|${amountRaw}|${quotedAt}`)
     .digest("base64url");
 }
